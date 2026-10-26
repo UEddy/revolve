@@ -14,5 +14,5 @@
     "skipLibCheck": true,
     "types": ["node"]
   },
-  "include": ["src/**/*.test.ts", "vite.config.ts", "build-env.ts", "build-env.test.ts"]
+  "include": ["src/**/*.test.ts", "vite.config.ts", "build-env.ts", "build-env.test.ts", "build-dist.ts", "build-dist.test.ts"]
 }

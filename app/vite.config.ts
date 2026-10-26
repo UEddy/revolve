@@ -1,8 +1,10 @@
 import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
 import { defineConfig, loadEnv, type Plugin } from "vite";
 import { createRelay } from "../relay/src/relay.ts";
 import { toNode } from "../relay/src/node.ts";
 import { checkBuildEnv, type BuildTargets } from "./build-env.ts";
+import { stripDotfiles } from "./build-dist.ts";
 
 // Production headers live in vercel.json; `vite preview` serves the same
 // ones so a build can be checked under the real CSP before deploying.
@@ -39,12 +41,30 @@ function narrowCsp(t: BuildTargets): Plugin {
   };
 }
 
+/** Second guard behind the public/ hygiene: nothing starting with a dot is ever deployed (build-dist.ts). */
+function noDotfiles(): Plugin {
+  let outDir = "dist";
+  let warn: (msg: string) => void = () => {};
+  return {
+    name: "revolve-no-dotfiles",
+    apply: "build",
+    configResolved(config) {
+      outDir = resolve(config.root, config.build.outDir);
+      warn = (msg) => config.logger.warn(msg);
+    },
+    closeBundle() {
+      const removed = stripDotfiles(outDir);
+      if (removed.length) warn(`removed from ${outDir}: ${removed.join(", ")}`);
+    },
+  };
+}
+
 export default defineConfig(({ command, mode }) => {
   const env = loadEnv(mode, process.cwd(), "");
   // Fails `vite build` on demo mode, a missing service, or plain http.
   const targets = command === "build" ? checkBuildEnv(mode, { ...env, ...process.env }) : null;
   return {
-    plugins: [devRelay(env), ...(targets ? [narrowCsp(targets)] : [])],
+    plugins: [devRelay(env), noDotfiles(), ...(targets ? [narrowCsp(targets)] : [])],
     build: { target: "es2022", sourcemap: false },
     server: { port: 5180, strictPort: true, host: true },
     preview: { port: 4180, strictPort: true, host: true, headers: previewHeaders },
