@@ -92,6 +92,10 @@ async fn main() -> anyhow::Result<()> {
         if let Some(c) = client.as_mut() {
             match round(c, &cfg, &ufvk, &cache, &mut db, &mut emitter).await {
                 Ok(()) => {}
+                Err(e) if is_broken_pipe(&e) => {
+                    // Whoever reads our stdout is gone; there is no one to report to.
+                    return Err(e);
+                }
                 Err(e) => {
                     warn!("sync round failed: {e:#}");
                     // Reconnect next round; a fresh Tor circuit is cheap.
@@ -107,6 +111,16 @@ async fn main() -> anyhow::Result<()> {
             _ = tokio::signal::ctrl_c() => return Ok(()),
         }
     }
+}
+
+fn is_broken_pipe(e: &anyhow::Error) -> bool {
+    use std::io::ErrorKind::BrokenPipe;
+    e.chain().any(|c| {
+        c.downcast_ref::<std::io::Error>()
+            .is_some_and(|io| io.kind() == BrokenPipe)
+            || c.downcast_ref::<serde_json::Error>()
+                .is_some_and(|j| j.io_error_kind() == Some(BrokenPipe))
+    })
 }
 
 /// Decodes the configured UFVK and drops every component except Orchard, so the
