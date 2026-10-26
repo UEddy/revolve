@@ -50,6 +50,8 @@ export type Position = {
   balance?: { lamports: string; tokenRaw: string; at: number };
   sends: { to: string; at: number; sig: string; what: "asset" | "cash" }[];
   keyRevealed?: boolean;
+  /** Created against the mock order service: no money moved, balances are simulated. */
+  demo?: boolean;
 };
 
 export type VaultData = {
