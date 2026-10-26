@@ -111,13 +111,20 @@ function PayCard({ p }: { p: Position }) {
 
 export function PositionScreen({ id }: { id: string }) {
   const { data, updatePosition } = useVault();
-  const { prices, busy, retrySwap, sell } = useEngine();
+  const { prices, busy, retrySwap, sell, priceOf } = useEngine();
   const [sending, setSending] = useState(false);
   const [selling, setSelling] = useState(false);
   const [showKey, setShowKey] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const all = data?.positions ?? [];
   const p = all.find((x) => x.id === id);
+  const mint = p?.token.mint;
+  useEffect(() => {
+    if (mint) {
+      priceOf(mint);
+      priceOf(SOL_MINT);
+    }
+  }, [mint, priceOf]);
   if (!p) return <div className="screen"><TopBar title="" /><p className="empty">This position is not in your vault.</p></div>;
 
   const held = units(p.balance?.tokenRaw ?? p.swap?.outAmount, p.token.decimals);
@@ -129,7 +136,7 @@ export function PositionScreen({ id }: { id: string }) {
 
   return (
     <div className="screen">
-      <TopBar title="" right={p.demo ? <span className="badge warn">Demo</span> : undefined} />
+      <TopBar title="" right={p.demo ? <span className="badge caution">Demo</span> : undefined} />
       <div className="row">
         <TokenIcon src={p.token.icon} symbol={p.token.symbol} large />
         <div className="grow">

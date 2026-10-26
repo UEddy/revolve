@@ -10,7 +10,7 @@ import { buildMemo, zip321 } from "../lib/memo.ts";
 import { createOrder, getOrder, type OrderState } from "../lib/orders.ts";
 import { ultraOrder, usdPrice } from "../lib/jupiter.ts";
 import { lamports, tokenRaw } from "../lib/solana.ts";
-import { buyWithPayout, fundedEnough, sellAll } from "../lib/swap.ts";
+import { buyWithPayout, fundedEnough, NotFunded, sellAll } from "../lib/swap.ts";
 import { Stagger } from "../lib/stagger.ts";
 import { random } from "../lib/bytes.ts";
 import type { Position, Stage, TokenRef } from "../lib/model.ts";
@@ -18,6 +18,7 @@ import type { Position, Stage, TokenRef } from "../lib/model.ts";
 const POLL_MS: [number, number] = [9_000, 18_000];
 const PRICE_TTL_MS = 60_000;
 const MAX_AUTO_SWAPS = 3;
+const RETRY_MS = 15_000;
 
 type Engine = {
   prices: Record<string, number>;
@@ -26,6 +27,8 @@ type Engine = {
   retrySwap(id: string): void;
   sell(id: string): Promise<void>;
   refresh(id: string): void;
+  /** Fetches one asset's price now (no wallet involved, so no stagger needed). */
+  priceOf(mint: string): void;
 };
 
 const Ctx = createContext<Engine | null>(null);
@@ -75,6 +78,7 @@ export function EngineProvider({ children }: { children: ReactNode }) {
   const [busy, setBusy] = useState<Record<string, string>>({});
   const priceAt = useRef<Record<string, number>>({});
   const inFlight = useRef(new Set<string>());
+  const stagger = useRef<Stagger | null>(null);
 
   const setBusyFor = (id: string, what: string | null) =>
     setBusy((b) => {
@@ -177,6 +181,16 @@ export function EngineProvider({ children }: { children: ReactNode }) {
           const q = await ultraOrder(SOL_MINT, p.token.mint, spend);
           out = { sig: "demo", inAmount: q.inAmount, outAmount: q.outAmount };
         } else {
+          // The chain is the record: if an earlier attempt landed but its
+          // answer was lost, the asset is already there. Never buy twice.
+          const already = await tokenRaw(p.burner.pub, p.token.mint);
+          if (already > 0n) {
+            await updatePosition(p.id, (x) => {
+              x.stage = "held";
+              x.balance = { lamports: x.balance?.lamports ?? "0", tokenRaw: already.toString(), at: Date.now() };
+            });
+            return;
+          }
           out = await buyWithPayout(p);
         }
         await updatePosition(p.id, (x) => {
@@ -185,10 +199,24 @@ export function EngineProvider({ children }: { children: ReactNode }) {
           if (x.demo) x.balance = { lamports: SWAP_RESERVE_LAMPORTS.toString(), tokenRaw: out.outAmount, at: Date.now() };
         });
       } catch (e) {
+        if (e instanceof NotFunded) {
+          // Back to waiting; the balance checks move it on when the payout shows.
+          await updatePosition(p.id, (x) => void (x.stage = "settling"));
+          stagger.current?.soon(p.id);
+          return;
+        }
+        let attempts = 0;
         await updatePosition(p.id, (x) => {
           x.stage = "swap_failed";
-          x.swap = { ...x.swap, error: e instanceof Error ? e.message : String(e), attempts: (x.swap?.attempts ?? 0) + 1 };
+          attempts = (x.swap?.attempts ?? 0) + 1;
+          x.swap = { ...x.swap, error: e instanceof Error ? e.message : String(e), attempts };
         });
+        if (attempts < MAX_AUTO_SWAPS) {
+          setTimeout(() => {
+            const now = latest.current.find((x) => x.id === p.id);
+            if (now?.stage === "swap_failed") void runSwapRef.current?.(now);
+          }, RETRY_MS * attempts);
+        }
       } finally {
         inFlight.current.delete(p.id);
         setBusyFor(p.id, null);
@@ -196,6 +224,8 @@ export function EngineProvider({ children }: { children: ReactNode }) {
     },
     [updatePosition],
   );
+  const runSwapRef = useRef(runSwap);
+  runSwapRef.current = runSwap;
 
   useEffect(() => {
     for (const p of positions) {
@@ -249,7 +279,6 @@ export function EngineProvider({ children }: { children: ReactNode }) {
   );
 
   // ---- staggered balance checks, one burner at a time ----
-  const stagger = useRef<Stagger | null>(null);
   useEffect(() => {
     if (!data) return;
     const s = new Stagger(async (id) => {
@@ -283,6 +312,11 @@ export function EngineProvider({ children }: { children: ReactNode }) {
 
   const refresh = useCallback((id: string) => stagger.current?.soon(id), []);
 
-  const api = useMemo<Engine>(() => ({ prices, busy, startOrder, retrySwap, sell, refresh }), [prices, busy, startOrder, retrySwap, sell, refresh]);
+  const priceOf = useCallback((mint: string) => void price(mint), [price]);
+
+  const api = useMemo<Engine>(
+    () => ({ prices, busy, startOrder, retrySwap, sell, refresh, priceOf }),
+    [prices, busy, startOrder, retrySwap, sell, refresh, priceOf],
+  );
   return <Ctx.Provider value={api}>{children}</Ctx.Provider>;
 }

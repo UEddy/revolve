@@ -15,6 +15,8 @@ function useToken(mint: string) {
   const [t, setT] = useState<JupToken | null>(seen.get(mint) ?? null);
   const [error, setError] = useState<string | null>(null);
   useEffect(() => {
+    // Lists already carry full token data; only look it up when arriving by link.
+    if (seen.has(mint)) return;
     let live = true;
     tokens
       .byMint(mint)
@@ -56,7 +58,7 @@ export function TokenScreen({ mint }: { mint: string }) {
           <div className="eyebrow">{isStock(t) ? "Stock" : "Token"}</div>
           <h1 style={{ margin: "4px 0 0", fontSize: 26 }}>{t.name}</h1>
           <div className="muted">
-            {t.symbol} {t.isVerified ? <span className="badge ok">✓ Verified</span> : <span className="badge warn">Unverified</span>}
+            {t.symbol} {t.isVerified ? <span className="badge ok">✓ Verified</span> : <span className="badge caution">Unverified</span>}
           </div>
         </div>
       </div>
@@ -151,7 +153,7 @@ function BuySheet({ open, onClose, t }: { open: boolean; onClose: () => void; t:
           <span>You get about</span>
           <span className="num">{t.id === SOL_MINT ? "–" : estimate === null ? "…" : `${amount(estimate)} ${t.symbol}`}</span>
         </div>
-        <div className="kv"><span>Lands in</span><span>A fresh wallet, sealed on this phone</span></div>
+        <div className="kv"><span>Goes to</span><span>A new wallet, only on this phone</span></div>
       </div>
       <Warnings items={warnings} />
       {error && <p className="err">{error}</p>}
