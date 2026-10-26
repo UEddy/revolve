@@ -1,15 +1,21 @@
-// Build-time settings. VITE_ORDER_API is the worker's base URL, or "mock" for
-// a demo that never touches money (the UI says so on every screen).
+// Build-time settings. VITE_ORDER_API is the worker's base URL; VITE_RELAY_URL
+// the privacy relay (../relay). Under `npm run dev` the order service defaults
+// to "mock", a demo that never touches money, and the relay runs inside the
+// dev server at /api. A production build refuses mock (build-env.ts), and
+// this file refuses it again at runtime in case a bundle was built some
+// other way.
 
 // `env` is absent outside Vite (node tests), hence the optional chaining.
-const env = (import.meta as { env?: { VITE_ORDER_API?: string; DEV?: boolean } }).env;
+const env = (import.meta as { env?: { VITE_ORDER_API?: string; VITE_RELAY_URL?: string; DEV?: boolean } }).env;
+const dev = env?.DEV === true;
 const raw = env?.VITE_ORDER_API?.trim() ?? "";
 
-export const ORDER_API: string | "mock" | null = raw === "mock" ? "mock" : raw ? raw.replace(/\/$/, "") : env?.DEV ? "mock" : null;
+const wantsMock = raw === "mock" || (!raw && dev);
+export const ORDER_API: string | "mock" | null = wantsMock ? (dev ? "mock" : null) : raw ? raw.replace(/\/$/, "") : null;
 export const MOCK = ORDER_API === "mock";
 
-/** Same-origin privacy relay (api/). */
-export const RELAY = "/api";
+/** The privacy relay: its own origin in production, the dev server's /api under `npm run dev`. */
+export const RELAY = env?.VITE_RELAY_URL?.trim().replace(/\/$/, "") || "/api";
 
 export const BUCKETS = ["0.005", "0.01", "0.05"] as const;
 export type Bucket = (typeof BUCKETS)[number];

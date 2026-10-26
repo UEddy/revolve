@@ -1,0 +1,10 @@
+# TLS in front of the relay (and the worker), on the droplet.
+# No `log` directive on purpose: Caddy keeps no access logs unless told to,
+# and access logs would record client IPs next to burner traffic.
+relay.revolve.example {
+	reverse_proxy 127.0.0.1:8788 {
+		# Do not hand the client's IP to the relay; it has no use for it.
+		header_up -X-Forwarded-For
+		header_up -X-Real-IP
+	}
+}

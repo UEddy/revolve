@@ -1,0 +1,26 @@
+# systemd unit for the relay on the droplet. Adjust paths and user to the
+# droplet's layout (the worker's checkout lives next to it).
+[Unit]
+Description=Revolve privacy relay
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+User=revolve
+WorkingDirectory=/opt/revolve/relay
+Environment=RELAY_ENV_FILE=/opt/revolve/relay/.env
+ExecStart=/usr/bin/node src/main.ts
+Restart=always
+RestartSec=2
+# 512 MB droplet shared with the watcher and worker: the response cache is
+# capped at 24 MB, so this leaves room for Node itself.
+MemoryMax=128M
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+PrivateDevices=yes
+RestrictAddressFamilies=AF_INET AF_INET6
+
+[Install]
+WantedBy=multi-user.target

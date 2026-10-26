@@ -1,0 +1,19 @@
+{
+  "name": "revolve-relay",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Revolve privacy relay: Solana RPC, Jupiter and token icons without the user's IP",
+  "engines": {
+    "node": ">=24"
+  },
+  "scripts": {
+    "start": "node src/main.ts",
+    "test": "node --test test/*.test.ts",
+    "typecheck": "tsc"
+  },
+  "devDependencies": {
+    "@types/node": "24.19.2",
+    "typescript": "5.9.3"
+  }
+}
