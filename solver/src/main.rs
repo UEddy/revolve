@@ -6,6 +6,7 @@
 //!   revolve-watcher           sync forever, emitting notes
 //!   revolve-watcher --once    one sync round, then exit
 //!   revolve-watcher address   print the Orchard-only deposit UA
+//!   revolve-watcher ufvk      print the Orchard-only UFVK, for the server's env file
 
 mod cache;
 mod config;
@@ -55,6 +56,13 @@ async fn main() -> anyhow::Result<()> {
     let arg = std::env::args().nth(1);
     let ufvk = orchard_only_ufvk(&cfg)?;
 
+    if arg.as_deref() == Some("ufvk") {
+        let encoded = ufvk
+            .encode(&cfg.network)
+            .map_err(|e| anyhow!("cannot encode UFVK: {e:?}"))?;
+        println!("{encoded}");
+        return Ok(());
+    }
     if arg.as_deref() == Some("address") {
         let (ua, _) = ufvk
             .default_address(UnifiedAddressRequest::ORCHARD)
@@ -62,7 +70,11 @@ async fn main() -> anyhow::Result<()> {
         println!("{}", ua.encode(&cfg.network));
         return Ok(());
     }
-    let once = arg.as_deref() == Some("--once");
+    let once = match arg.as_deref() {
+        None => false,
+        Some("--once") => true,
+        Some(other) => return Err(anyhow!("unknown argument {other:?}")),
+    };
 
     std::fs::create_dir_all(&cfg.data_dir)?;
     let db_path = cfg.data_dir.join("wallet.sqlite");
