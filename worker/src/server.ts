@@ -53,6 +53,9 @@ function payoutIfAvailable(deps: ServerDeps, bucketZat: bigint): bigint | null {
 }
 
 function getBuckets(res: ServerResponse, deps: ServerDeps) {
+  // Until both a price and the hot wallet balance are known, say so rather than
+  // reporting every bucket as unavailable.
+  if (deps.freeInventory() === null || deps.quote(1n) === null) return send(res, 503, { error: "not_ready" });
   const buckets = Object.entries(BUCKETS).map(([bucket_zec, zat]) => ({
     bucket_zec,
     available: payoutIfAvailable(deps, zat) !== null,

@@ -5,7 +5,7 @@ import { openDb } from "../src/db.ts";
 import { OrderBook } from "../src/orders.ts";
 import { createApi } from "../src/server.ts";
 
-async function withApi(free: bigint, fn: (base: string) => Promise<void>) {
+async function withApi(free: bigint | null, fn: (base: string) => Promise<void>) {
   const server = createApi({
     book: new OrderBook(openDb(":memory:")),
     appOrigin: "https://app.test",
@@ -57,4 +57,11 @@ test("POST /orders: 201 for an available bucket, 409 otherwise", () =>
     assert.deepEqual(await full.json(), { error: "bucket_unavailable" });
 
     assert.equal((await post("0.02")).status, 400);
+  }));
+
+test("GET /buckets is 503 until price and balance are loaded", () =>
+  withApi(null, async (base) => {
+    const res = await fetch(`${base}/buckets`);
+    assert.equal(res.status, 503);
+    assert.deepEqual(await res.json(), { error: "not_ready" });
   }));

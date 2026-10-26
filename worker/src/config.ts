@@ -35,8 +35,8 @@ export function loadConfig(): Config {
     lamportsPerZec: fixedRate === "" ? null : BigInt(fixedRate),
     spreadBps: Number(opt("SPREAD_BPS", "150")),
     swapFeeLamports: BigInt(opt("SWAP_FEE_LAMPORTS", "5000000")),
-    quoteTtlSecs: Number(opt("QUOTE_TTL_SECS", "1800")),
-    maxOpenOrders: Number(opt("MAX_OPEN_ORDERS", "200")),
+    quoteTtlSecs: Number(opt("QUOTE_TTL_SECS", "900")),
+    maxOpenOrders: Number(opt("MAX_OPEN_ORDERS", "20")),
   };
 }
 
