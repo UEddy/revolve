@@ -1,0 +1,12 @@
+.env
+.env.*
+!.env.example
+*.age
+*-wallet/
+*.sqlite
+*.db
+node_modules/
+target/
+dist/
+.DS_Store
+data/

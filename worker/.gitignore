@@ -1,0 +1,4 @@
+data/
+keys/
+*keypair*.json
+hot-wallet*.json

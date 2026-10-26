@@ -1,0 +1,45 @@
+[package]
+name = "revolve-watcher"
+version = "0.1.0"
+edition = "2024"
+publish = false
+description = "View-only Zcash watcher for Revolve: emits one JSON line per received Orchard/Ironwood note"
+
+[dependencies]
+anyhow = "1"
+async-trait = "0.1"
+dotenvy = "0.15"
+hex = "0.4"
+rand = { version = "0.10", default-features = false, features = ["sys_rng"] }
+rusqlite = { version = "0.37", features = ["bundled"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+tokio = { version = "1.21.0", features = ["macros", "rt-multi-thread", "signal", "time"] }
+tonic = { version = "0.14", features = ["gzip", "tls-webpki-roots"] }
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter", "fmt"] }
+
+# Zcash. Versions and git rev match ~/revolve-spike/zcash-devtool/Cargo.lock
+# (librustzcash eb38d7a), which syncs the Ironwood tree (NU6.3).
+orchard = { version = "0.16", default-features = false }
+zcash_client_backend = { version = "=0.25.0-pre.2", features = ["lightwalletd-tonic-tls-webpki-roots", "orchard", "sync", "tor", "unstable"] }
+zcash_client_sqlite = { version = "=0.23.0-pre.2", features = ["orchard", "unstable"] }
+zcash_keys = { version = "=0.17.0-pre.2", features = ["orchard", "unstable", "unstable-frost"] }
+zcash_primitives = "=0.31.0-pre.2"
+zcash_protocol = "=0.11.0-pre.1"
+
+[patch.crates-io]
+equihash = { git = "https://github.com/zcash/librustzcash.git", rev = "eb38d7a373661179dbc083a2fd58b3a6c9b25818" }
+pczt = { git = "https://github.com/zcash/librustzcash.git", rev = "eb38d7a373661179dbc083a2fd58b3a6c9b25818" }
+zcash_address = { git = "https://github.com/zcash/librustzcash.git", rev = "eb38d7a373661179dbc083a2fd58b3a6c9b25818" }
+zcash_client_backend = { git = "https://github.com/zcash/librustzcash.git", rev = "eb38d7a373661179dbc083a2fd58b3a6c9b25818" }
+zcash_client_sqlite = { git = "https://github.com/zcash/librustzcash.git", rev = "eb38d7a373661179dbc083a2fd58b3a6c9b25818" }
+zcash_encoding = { git = "https://github.com/zcash/librustzcash.git", rev = "eb38d7a373661179dbc083a2fd58b3a6c9b25818" }
+zcash_keys = { git = "https://github.com/zcash/librustzcash.git", rev = "eb38d7a373661179dbc083a2fd58b3a6c9b25818" }
+zcash_primitives = { git = "https://github.com/zcash/librustzcash.git", rev = "eb38d7a373661179dbc083a2fd58b3a6c9b25818" }
+zcash_protocol = { git = "https://github.com/zcash/librustzcash.git", rev = "eb38d7a373661179dbc083a2fd58b3a6c9b25818" }
+zcash_transparent = { git = "https://github.com/zcash/librustzcash.git", rev = "eb38d7a373661179dbc083a2fd58b3a6c9b25818" }
+zip321 = { git = "https://github.com/zcash/librustzcash.git", rev = "eb38d7a373661179dbc083a2fd58b3a6c9b25818" }
+
+[profile.release]
+strip = true

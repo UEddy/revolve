@@ -1,0 +1,32 @@
+{
+  "name": "revolve-app",
+  "private": true,
+  "version": "0.1.0",
+  "license": "MIT",
+  "type": "module",
+  "engines": {
+    "node": "24.x"
+  },
+  "scripts": {
+    "dev": "vite",
+    "typecheck": "tsc -p tsconfig.json && tsc -p tsconfig.node.json",
+    "build": "npm run typecheck && vite build",
+    "preview": "vite preview",
+    "test": "node --test \"src/**/*.test.ts\" \"api/**/*.test.ts\""
+  },
+  "dependencies": {
+    "@fontsource/besley": "5.3.0",
+    "@fontsource/work-sans": "5.3.0",
+    "@noble/curves": "2.4.0",
+    "@scure/base": "2.4.0",
+    "react": "19.3.0",
+    "react-dom": "19.3.0"
+  },
+  "devDependencies": {
+    "@types/node": "24.19.0",
+    "@types/react": "19.3.0",
+    "@types/react-dom": "19.3.0",
+    "typescript": "7.0.2",
+    "vite": "8.3.1"
+  }
+}
