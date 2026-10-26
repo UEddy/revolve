@@ -8,13 +8,13 @@ The server never learns what the user buys. It only sells SOL for ZEC. Token cho
 
 ## Buckets
 
-Fixed amounts only (blend in, no fingerprinting): `0.005`, `0.01`, `0.05` ZEC. Server may disable buckets larger than current inventory.
+Fixed amounts only (blend in, no fingerprinting): `0.002`, `0.005`, `0.01` ZEC. Server may disable buckets larger than current inventory.
 
 ## GET /buckets
 
 Response 200:
 ```json
-{ "buckets": [ { "bucket_zec": "0.005", "available": true }, { "bucket_zec": "0.01", "available": true }, { "bucket_zec": "0.05", "available": false } ] }
+{ "buckets": [ { "bucket_zec": "0.002", "available": true }, { "bucket_zec": "0.005", "available": true }, { "bucket_zec": "0.01", "available": false } ] }
 ```
 - `available` reflects hot wallet inventory only. No other state. The app calls this before showing the buy screen and greys out unavailable buckets.
 - POST /orders still returns 409 `{"error":"bucket_unavailable"}` if inventory changed in between.

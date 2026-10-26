@@ -12,7 +12,7 @@ async function withApi(free: bigint | null, fn: (base: string) => Promise<void>)
     depositUa: "u1test",
     quoteTtlSecs: 1800,
     maxOpenOrders: 10,
-    quote: (zat) => zat * 100n, // 0.005 -> 50M, 0.01 -> 100M, 0.05 -> 500M lamports
+    quote: (zat) => zat * 100n, // 0.002 -> 20M, 0.005 -> 50M, 0.01 -> 100M lamports
     freeInventory: () => free,
   });
   await new Promise<void>((r) => server.listen(0, "127.0.0.1", r));
@@ -24,21 +24,21 @@ async function withApi(free: bigint | null, fn: (base: string) => Promise<void>)
 }
 
 test("GET /buckets reflects inventory", () =>
-  withApi(200_000_000n, async (base) => {
+  withApi(60_000_000n, async (base) => {
     const res = await fetch(`${base}/buckets`);
     assert.equal(res.status, 200);
     assert.equal(res.headers.get("access-control-allow-origin"), "https://app.test");
     assert.deepEqual(await res.json(), {
       buckets: [
+        { bucket_zec: "0.002", available: true },
         { bucket_zec: "0.005", available: true },
-        { bucket_zec: "0.01", available: true },
-        { bucket_zec: "0.05", available: false },
+        { bucket_zec: "0.01", available: false },
       ],
     });
   }));
 
 test("POST /orders: 201 for an available bucket, 409 otherwise", () =>
-  withApi(200_000_000n, async (base) => {
+  withApi(60_000_000n, async (base) => {
     const post = (bucket_zec: string) =>
       fetch(`${base}/orders`, { method: "POST", body: JSON.stringify({ bucket_zec }) });
 
@@ -52,11 +52,12 @@ test("POST /orders: 201 for an available bucket, 409 otherwise", () =>
     const status = await fetch(`${base}/orders/${body.order_id}`);
     assert.deepEqual(await status.json(), { status: "awaiting_payment", confirmations: 0, payout_signature: null });
 
-    const full = await post("0.05");
+    const full = await post("0.01");
     assert.equal(full.status, 409);
     assert.deepEqual(await full.json(), { error: "bucket_unavailable" });
 
     assert.equal((await post("0.02")).status, 400);
+    assert.equal((await post("0.05")).status, 400);
   }));
 
 test("GET /buckets is 503 until price and balance are loaded", () =>

@@ -4,9 +4,9 @@ import { PublicKey } from "@solana/web3.js";
 
 /** Fixed buckets from API_CONTRACT.md, in zatoshis. */
 export const BUCKETS: Record<string, bigint> = {
+  "0.002": 200_000n,
   "0.005": 500_000n,
   "0.01": 1_000_000n,
-  "0.05": 5_000_000n,
 };
 
 export const REQUIRED_CONFS = 3;
