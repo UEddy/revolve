@@ -17,7 +17,7 @@ export const MOCK = ORDER_API === "mock";
 /** The privacy relay: its own origin in production, the dev server's /api under `npm run dev`. */
 export const RELAY = env?.VITE_RELAY_URL?.trim().replace(/\/$/, "") || "/api";
 
-export const BUCKETS = ["0.005", "0.01", "0.05"] as const;
+export const BUCKETS = ["0.002", "0.005", "0.01"] as const;
 export type Bucket = (typeof BUCKETS)[number];
 
 export const SOL_MINT = "So11111111111111111111111111111111111111112";

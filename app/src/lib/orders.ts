@@ -2,7 +2,7 @@
 // bucket; what the user buys and where it lands stay on the device.
 
 import { ORDER_API } from "./config.ts";
-import type { Bucket } from "./config.ts";
+import { BUCKETS, type Bucket } from "./config.ts";
 import type { OrderStatus } from "./model.ts";
 import { random } from "./bytes.ts";
 import { base32nopad } from "@scure/base";
@@ -76,7 +76,7 @@ export type BucketState = { loading: true } | { loading: false; available: Recor
  * and balance: that is "ask again soon", not "unavailable".
  */
 export async function getBuckets(): Promise<BucketState> {
-  if (import.meta.env.DEV && ORDER_API === "mock") return { loading: false, available: { "0.005": true, "0.01": true, "0.05": true } };
+  if (import.meta.env.DEV && ORDER_API === "mock") return { loading: false, available: Object.fromEntries(BUCKETS.map((b) => [b, true])) };
   try {
     const r = await call<{ buckets: { bucket_zec: string; available: boolean }[] }>("/buckets");
     return { loading: false, available: Object.fromEntries(r.buckets.map((b) => [b.bucket_zec, b.available === true])) };
