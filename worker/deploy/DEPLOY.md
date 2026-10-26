@@ -132,7 +132,8 @@ curl -si -X OPTIONS -H "Origin: $O" $B/orders | grep -i access-control-allow-ori
 
 ```bash
 ls /var/log/caddy 2>/dev/null || echo "no caddy log dir"
-journalctl -u caddy -u revolve-worker -u revolve-relay --since today | grep -cE 'remote_ip|client_ip|X-Forwarded-For'   # expect 0
+# Caddy's admin API logs our own reloads (from 127.0.0.1 to localhost:2019); those are not client traffic.
+journalctl -u caddy -u revolve-worker -u revolve-relay --since today | grep -v '"logger":"admin.api"' | grep -cE 'remote_ip|client_ip|X-Forwarded-For'   # expect 0
 ```
 
 ## Operating
