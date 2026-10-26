@@ -69,6 +69,7 @@ Demo centerpiece: that explorer page side by side with ours.
 
 - Tier 1 (must ship): the whole Solana catalog through one integration. Any SPL token Jupiter can route (all memecoins with liquidity, not a curated list) plus tokenized stocks on Solana. Search, trending and new launches pulled from Jupiter's token data. End to end on mainnet.
 - Tier 2 (start only when Tier 1 works end to end, target Wed 06:00 UTC): Polymarket. Browsing every market is cheap (public market data API) and ships with Tier 1. Placing bets needs USDC on Polygon to an EVM burner, Polymarket's proxy wallet setup and signed CLOB orders: 8 to 10 hours, and region restrictions must be checked first.
+- Gated stretch: in-app non-custodial shielded wallet (fund once, buy without Zodl confirms). Start ONLY when everything else is shipped (deployed, README, repo public-ready) and the Remotion video is the only task left. Before writing code, a 30 minute check: does an in-browser Zcash library (e.g. WebZjs) support Ironwood sends and proving on Android Chrome? If not, it stays on the roadmap.
 - Tier 3 (roadmap slide): stocks on other chains (e.g. Robinhood Chain) and EVM NFTs, each needs a new payout chain plus its own DEX or marketplace integration; Solana NFTs; in-app shielded wallet; exit path back to shielded ZEC.
 
 ## Trust boundaries (README, stated upfront)
