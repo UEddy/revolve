@@ -26,9 +26,17 @@ export type JupToken = {
 
 async function jup<T>(path: string, params: Record<string, string> = {}, init?: RequestInit): Promise<T> {
   const q = new URLSearchParams({ path, ...params });
-  const res = await fetch(`${RELAY}/jup?${q}`, { credentials: "omit", ...init });
-  if (!res.ok) throw new Error(res.status === 429 ? "Market data is busy, try again in a moment" : `Market data unavailable (${res.status})`);
-  return (await res.json()) as T;
+  // Rate limits are per relay, shared by everyone: back off and retry reads.
+  // Never retry execute: a signed swap is sent once.
+  const tries = init?.method === "POST" ? 1 : 4;
+  for (let i = 0; ; i++) {
+    const res = await fetch(`${RELAY}/jup?${q}`, { credentials: "omit", ...init });
+    if (res.ok) return (await res.json()) as T;
+    if (res.status !== 429 || i + 1 >= tries) {
+      throw new Error(res.status === 429 ? "Market data is busy, try again in a moment" : `Market data unavailable (${res.status})`);
+    }
+    await new Promise((r) => setTimeout(r, 800 * 2 ** i + Math.random() * 400));
+  }
 }
 
 export function isStock(t: Pick<JupToken, "tags">): boolean {

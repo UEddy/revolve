@@ -7,11 +7,12 @@ import { Back } from "./icons.tsx";
 import { back } from "../router.ts";
 
 export function TokenIcon({ src, symbol, large }: { src?: string; symbol: string; large?: boolean }) {
-  const [failed, setFailed] = useState(false);
+  const [loaded, setLoaded] = useState(false);
   const url = iconUrl(src);
   return (
     <span className={`ticon${large ? " lg" : ""}`} aria-hidden>
-      {url && !failed ? <img src={url} alt="" loading="lazy" referrerPolicy="no-referrer" onError={() => setFailed(true)} /> : symbol.slice(0, 1).toUpperCase()}
+      {!loaded && symbol.slice(0, 1).toUpperCase()}
+      {url && <img src={url} alt="" loading="lazy" referrerPolicy="no-referrer" className={loaded ? "in" : undefined} onLoad={() => setLoaded(true)} />}
     </span>
   );
 }

@@ -11,6 +11,13 @@ import { signTx } from "./tx.ts";
 
 export type SwapOutcome = { sig: string; inAmount: string; outAmount: string };
 
+/** The payout is not visible on chain yet: wait, this is not a failed swap. */
+export class NotFunded extends Error {
+  constructor() {
+    super("The payout has not arrived yet");
+  }
+}
+
 async function run(p: Position, inputMint: string, outputMint: string, amount: bigint): Promise<SwapOutcome> {
   const order = await ultraOrder(inputMint, outputMint, amount, p.burner.pub);
   if (!order.transaction) throw new Error(order.errorMessage || order.error || "No route for this trade right now");
@@ -23,9 +30,8 @@ async function run(p: Position, inputMint: string, outputMint: string, amount: b
 /** Spends the payout on the chosen asset, keeping SWAP_RESERVE_LAMPORTS for fees and a later sale. */
 export async function buyWithPayout(p: Position): Promise<SwapOutcome> {
   const bal = await lamports(p.burner.pub);
-  const spend = bal - SWAP_RESERVE_LAMPORTS;
-  if (spend <= 0n) throw new Error("The payout has not arrived yet");
-  return run(p, SOL_MINT, p.token.mint, spend);
+  if (!fundedEnough(bal)) throw new NotFunded();
+  return run(p, SOL_MINT, p.token.mint, bal - SWAP_RESERVE_LAMPORTS);
 }
 
 /** Sells the whole position back to cash in the same burner (nothing leaves it). */

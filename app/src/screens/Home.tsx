@@ -89,7 +89,7 @@ export function Home() {
               <a key={p.id} className="trow" href={href.position(p.id)}>
                 <TokenIcon src={p.token.icon} symbol={p.token.symbol} />
                 <div className="grow">
-                  <div className="name">{p.stage === "closed" ? "Cash" : p.token.symbol} {p.demo && <span className="badge warn">Demo</span>}</div>
+                  <div className="name">{p.stage === "closed" ? "Cash" : p.token.symbol} {p.demo && <span className="badge caution">Demo</span>}</div>
                   <div className="sub">
                     {p.stage === "closed" ? `from ${p.token.symbol}` : `${amount(held)} ${p.token.symbol}`} · {ago(p.createdAt)}
                   </div>
