@@ -64,20 +64,20 @@ async function call<T>(path: string, init?: RequestInit): Promise<T> {
 }
 
 export async function createOrder(bucket: Bucket): Promise<Quote> {
-  if (ORDER_API === "mock") return checkQuote(mock.create(bucket), bucket);
+  if (import.meta.env.DEV && ORDER_API === "mock") return checkQuote(mock.create(bucket), bucket);
   return checkQuote(await call<Quote>("/orders", { method: "POST", body: JSON.stringify({ bucket_zec: bucket }) }), bucket);
 }
 
 /** Which amounts the payout inventory can cover right now. Missing buckets count as unavailable. */
 export async function getBuckets(): Promise<Record<string, boolean>> {
-  if (ORDER_API === "mock") return { "0.005": true, "0.01": true, "0.05": true };
+  if (import.meta.env.DEV && ORDER_API === "mock") return { "0.005": true, "0.01": true, "0.05": true };
   const r = await call<{ buckets: { bucket_zec: string; available: boolean }[] }>("/buckets");
   return Object.fromEntries(r.buckets.map((b) => [b.bucket_zec, b.available === true]));
 }
 
 /** `null` once the server has forgotten the order (404 after payout). */
 export async function getOrder(orderId: string): Promise<OrderState | null> {
-  if (ORDER_API === "mock") return mock.get(orderId);
+  if (import.meta.env.DEV && ORDER_API === "mock") return mock.get(orderId);
   try {
     return await call<OrderState>(`/orders/${encodeURIComponent(orderId)}`);
   } catch (e) {
