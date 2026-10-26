@@ -34,7 +34,7 @@ Settings (`.env.example`):
 - `src/lib/passkey.ts`, `vault.ts`: passkey creation with PRF, HKDF-SHA256 to a non-extractable AES-256-GCM key, sealed vault. The vault is written before any burner is shown, and locks 3 minutes after the app goes to the background.
 - `src/lib/burner.ts`, `tx.ts`, `transfer.ts`: ed25519 burners, signing Jupiter's serialized transactions in our signer slot, and minimal SOL/SPL transfers (both token programs), without a Solana SDK.
 - `src/lib/memo.ts`: `rv1|<order_id>|<burner>` and `zcash:<ua>?amount=<zec>&memo=<base64url>`.
-- `src/lib/orders.ts`: contract client (`GET /buckets`, `POST /orders`, `GET /orders/:id`) plus the demo mock.
+- `src/lib/orders.ts`: contract client (`GET /buckets`, `POST /orders`, `GET /orders/:id`) plus the demo mock. A 503 from `/buckets` means the worker is still loading its price and balance: the buy sheet shows "Getting the latest rates", holds Continue and asks again every 3 to 5 seconds while open.
 - `src/state/engine.tsx`: jittered order polling, the swap as soon as the payout is on chain (idempotent: it checks the burner's balance first and never buys twice), retries, and the balance scheduler.
 - `src/lib/stagger.ts`: every burner on its own random timer, with a random minimum gap between any two checks, so no two burners are ever queried together.
 - `src/lib/coach.ts`: per-position linkability score with reasons, and warnings before risky moves (launch sniping, tiny holder counts, repeat buys, sending to another of your wallets or to an address another wallet already used, exporting a key).

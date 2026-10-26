@@ -90,31 +90,59 @@ export function TokenScreen({ mint }: { mint: string }) {
   );
 }
 
+const BUCKET_RETRY_MS: [number, number] = [3_000, 5_000];
+
+/**
+ * Bucket availability while the sheet is open. "loading" until the worker
+ * has a price and balance (it answers 503 until then; we ask again every few
+ * seconds). "unknown" if it can't be reached: buying stays possible and the
+ * order request itself reports any problem.
+ */
+type Buckets = { phase: "loading" } | { phase: "ready"; available: Record<string, boolean> } | { phase: "unknown" };
+
+function useBuckets(open: boolean): Buckets {
+  const [state, setState] = useState<Buckets>({ phase: "loading" });
+  useEffect(() => {
+    if (!open) return;
+    let live = true;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    setState({ phase: "loading" });
+    const ask = () =>
+      getBuckets().then(
+        (b) => {
+          if (!live) return;
+          if (b.loading) {
+            const [lo, hi] = BUCKET_RETRY_MS;
+            timer = setTimeout(ask, lo + Math.random() * (hi - lo));
+          } else setState({ phase: "ready", available: b.available });
+        },
+        () => live && setState({ phase: "unknown" }),
+      );
+    void ask();
+    return () => {
+      live = false;
+      clearTimeout(timer);
+    };
+  }, [open]);
+  return state;
+}
+
 function BuySheet({ open, onClose, t }: { open: boolean; onClose: () => void; t: JupToken }) {
   const { data } = useVault();
   const { startOrder } = useEngine();
   const zec = usePrice(ZEC_MINT);
   const sol = usePrice(SOL_MINT);
   const [bucket, setBucket] = useState<Bucket>("0.01");
-  const [available, setAvailable] = useState<Record<string, boolean> | null>(null);
+  const buckets = useBuckets(open);
+  const loading = buckets.phase === "loading";
+  const available = buckets.phase === "ready" ? buckets.available : null;
+  const offered = (b: string) => available === null || available[b] === true;
+  const noneAvailable = available !== null && !BUCKETS.some(offered);
 
+  // Keep the choice if it is offered, else fall back to the smallest one that is.
   useEffect(() => {
-    if (!open) return;
-    let live = true;
-    getBuckets().then(
-      (b) => {
-        if (!live) return;
-        setAvailable(b);
-        // Keep the choice if it is offered, else fall back to the smallest one that is.
-        setBucket((cur) => (b[cur] ? cur : (BUCKETS.find((x) => b[x]) ?? cur)));
-      },
-      () => live && setAvailable(null),
-    );
-    return () => {
-      live = false;
-    };
-  }, [open]);
-  const noneAvailable = available !== null && !BUCKETS.some((b) => available[b]);
+    if (available) setBucket((cur) => (available[cur] ? cur : (BUCKETS.find((x) => available[x]) ?? cur)));
+  }, [available]);
   const [estimate, setEstimate] = useState<number | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -161,7 +189,7 @@ function BuySheet({ open, onClose, t }: { open: boolean; onClose: () => void; t:
       </div>
       <div className="chips" role="group" aria-label="Amount">
         {BUCKETS.map((b) => (
-          <button key={b} className="chip" aria-pressed={bucket === b} disabled={available !== null && !available[b]} onClick={() => setBucket(b)}>
+          <button key={b} className="chip" aria-pressed={bucket === b} disabled={!offered(b)} onClick={() => setBucket(b)}>
             <strong>{b}</strong>
             <span>ZEC{zec ? ` · ${usd(Number(b) * zec)}` : ""}</span>
           </button>
@@ -175,12 +203,17 @@ function BuySheet({ open, onClose, t }: { open: boolean; onClose: () => void; t:
         </div>
         <div className="kv"><span>Goes to</span><span>A new wallet, only on this phone</span></div>
       </div>
+      {loading && (
+        <p className="row faint" role="status" style={{ gap: 10, margin: "0 0 14px" }}>
+          <Spinner /> Getting the latest rates…
+        </p>
+      )}
       <Warnings items={warnings} />
       {noneAvailable && <p className="err">Buying is paused while the payout wallet refills. Try again soon.</p>}
       {error && <p className="err">{error}</p>}
       <div className="spacer" />
-      <button className="btn" onClick={buy} disabled={busy || noneAvailable || (available !== null && !available[bucket])}>
-        {busy ? <Spinner /> : null} {MOCK ? "Continue (demo, no money moves)" : "Continue to payment"}
+      <button className="btn" onClick={buy} disabled={busy || loading || noneAvailable || !offered(bucket)}>
+        {busy ? <Spinner /> : null} {loading ? "Loading rates…" : MOCK ? "Continue (demo, no money moves)" : "Continue to payment"}
       </button>
       <p className="faint center">A small part of the payout stays in the wallet to cover fees and a later sale.</p>
     </Sheet>
