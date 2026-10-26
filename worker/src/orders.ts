@@ -54,6 +54,13 @@ export interface DuePayout {
   lamports: bigint;
 }
 
+export interface ReviewNote {
+  note_key: string;
+  value_zat: number;
+  reason: string;
+  confirmations: number;
+}
+
 export interface InFlightPayout {
   orderId: string;
   signature: string;
@@ -178,11 +185,11 @@ export class OrderBook {
     }
 
     const memo = parseMemo(n.memo);
-    if (!memo) return this.reviewNote(key, n.value, "malformed_memo");
+    if (!memo) return this.reviewNote(key, n, "malformed_memo");
     const order = this.row(memo.orderId);
-    if (!order) return this.reviewNote(key, n.value, "unknown_order");
+    if (!order) return this.reviewNote(key, n, "unknown_order");
     if (order.status !== "awaiting_payment" && order.status !== "expired") {
-      return this.reviewNote(key, n.value, "duplicate_payment");
+      return this.reviewNote(key, n, "duplicate_payment");
     }
 
     let reason: string | null = null;
@@ -223,13 +230,17 @@ export class OrderBook {
     }));
   }
 
-  /** Persisted before broadcast, so a crash can never lead to paying twice. */
-  markPaying(orderId: string, signature: string, validUntilBlockHeight: number): void {
-    this.db
+  /**
+   * Claims a confirmed order for payout, persisted before broadcast so a crash can
+   * never lead to paying twice. Returns false if another process claimed it first.
+   */
+  markPaying(orderId: string, signature: string, validUntilBlockHeight: number): boolean {
+    const r = this.db
       .prepare(
         "UPDATE orders SET status = 'paying', payout_signature = ?, payout_valid_until = ? WHERE order_id = ? AND status = 'confirmed'",
       )
       .run(signature, validUntilBlockHeight, orderId);
+    return Number(r.changes) === 1;
   }
 
   /** The payout transaction expired unseen; it is safe to try again. */
@@ -259,6 +270,63 @@ export class OrderBook {
     this.paid.set(orderId, { signature, until: this.now() + PAID_CACHE_MS });
   }
 
+  // Operator actions (src/admin.ts only; never reachable over HTTP).
+
+  reviewNotes(): ReviewNote[] {
+    return this.db.prepare("SELECT * FROM review_notes ORDER BY note_key").all() as unknown as ReviewNote[];
+  }
+
+  reviewOrders(): { order_id: string; bucket_zat: number; burner: string | null; note_key: string | null; review_reason: string | null }[] {
+    return this.db
+      .prepare("SELECT order_id, bucket_zat, burner, note_key, review_reason FROM orders WHERE status = 'needs_review'")
+      .all() as never;
+  }
+
+  /** The quote and state of an order, for binding a review note to it. */
+  quoteOf(orderId: string): { status: string; bucketZat: bigint; lamports: bigint; noteKey: string | null } | null {
+    const r = this.row(orderId);
+    return r
+      ? { status: r.status, bucketZat: BigInt(r.bucket_zat), lamports: BigInt(r.payout_lamports), noteKey: r.note_key }
+      : null;
+  }
+
+  /**
+   * Turns a review note into a confirmed order that is due now, paying `burner`.
+   * With `orderId`, that unpaid order (and its quote) is reused; otherwise a new
+   * internal order is made for `lamports`. Returns the order id to pay.
+   */
+  bindReviewNote(noteKey: string, burner: string, target: { orderId: string } | { lamports: bigint }): string {
+    this.db.exec("BEGIN IMMEDIATE");
+    try {
+      const note = this.db.prepare("SELECT * FROM review_notes WHERE note_key = ?").get(noteKey) as ReviewNote | undefined;
+      if (!note) throw new Error("no such review note");
+      let orderId: string;
+      if ("orderId" in target) {
+        const o = this.row(target.orderId);
+        if (!o || o.note_key !== null || (o.status !== "awaiting_payment" && o.status !== "expired")) {
+          throw new Error("order must exist, be unpaid, and have no note");
+        }
+        orderId = o.order_id;
+      } else {
+        orderId = newOrderId();
+        this.db
+          .prepare("INSERT INTO orders (order_id, bucket_zat, payout_lamports, expires_at, status) VALUES (?, ?, ?, 0, 'expired')")
+          .run(orderId, note.value_zat, target.lamports.toString());
+      }
+      this.db
+        .prepare(
+          "UPDATE orders SET status = 'confirmed', burner = ?, note_key = ?, confirmations = ?, pay_at_confs = 0, review_reason = NULL WHERE order_id = ?",
+        )
+        .run(burner, noteKey, note.confirmations, orderId);
+      this.db.prepare("DELETE FROM review_notes WHERE note_key = ?").run(noteKey);
+      this.db.exec("COMMIT");
+      return orderId;
+    } catch (e) {
+      this.db.exec("ROLLBACK");
+      throw e;
+    }
+  }
+
   private updateConfs(row: OrderRow, confs: number): void {
     let status = row.status;
     if (status === "seen" && confs >= REQUIRED_CONFS) status = "confirmed";
@@ -267,8 +335,12 @@ export class OrderBook {
       .run(confs, status, row.order_id);
   }
 
-  private reviewNote(key: string, valueZat: number, reason: string): void {
-    this.db.prepare("INSERT OR IGNORE INTO review_notes VALUES (?, ?, ?)").run(key, valueZat, reason);
+  private reviewNote(key: string, n: NoteLine, reason: string): void {
+    this.db
+      .prepare(
+        "INSERT INTO review_notes (note_key, value_zat, reason, confirmations) VALUES (?, ?, ?, ?) ON CONFLICT(note_key) DO UPDATE SET confirmations = excluded.confirmations",
+      )
+      .run(key, n.value, reason, n.confirmations);
   }
 
   private bump(key: string): void {

@@ -26,7 +26,8 @@ CREATE TABLE IF NOT EXISTS settled_notes (note_hash TEXT PRIMARY KEY);
 CREATE TABLE IF NOT EXISTS review_notes (
   note_key TEXT PRIMARY KEY,
   value_zat INTEGER NOT NULL,
-  reason TEXT NOT NULL
+  reason TEXT NOT NULL,
+  confirmations INTEGER NOT NULL DEFAULT 0
 );
 CREATE TABLE IF NOT EXISTS stats (key TEXT PRIMARY KEY, n INTEGER NOT NULL);
 `;
@@ -35,6 +36,12 @@ export function openDb(path: string): DatabaseSync {
   if (path !== ":memory:") mkdirSync(dirname(path), { recursive: true });
   const db = new DatabaseSync(path);
   db.exec("PRAGMA journal_mode = WAL;");
+  // The worker and the admin CLI share this file; wait for each other's writes.
+  db.exec("PRAGMA busy_timeout = 5000;");
   db.exec(SCHEMA);
+  const reviewCols = db.prepare("PRAGMA table_info(review_notes)").all() as { name: string }[];
+  if (!reviewCols.some((c) => c.name === "confirmations")) {
+    db.exec("ALTER TABLE review_notes ADD COLUMN confirmations INTEGER NOT NULL DEFAULT 0");
+  }
   return db;
 }
