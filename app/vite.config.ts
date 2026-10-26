@@ -82,7 +82,9 @@ export default defineConfig(({ command, mode }) => {
   return {
     plugins: [...(command === "serve" ? [devRelay(env)] : []), noDotfiles(), ...(targets ? [narrowCsp(targets)] : [])],
     build: { target: "es2022", sourcemap: false },
-    server: { port: 5180, strictPort: true, host: true },
-    preview: { port: 4180, strictPort: true, host: true, headers: previewHeaders },
+    // Loopback only. To test from a phone on the LAN, opt in for that session:
+    // `npm run dev -- --host` (or `npm run preview -- --host`).
+    server: { port: 5180, strictPort: true, host: "localhost" },
+    preview: { port: 4180, strictPort: true, host: "localhost", headers: previewHeaders },
   };
 });
