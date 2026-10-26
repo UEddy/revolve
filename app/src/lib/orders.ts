@@ -27,6 +27,14 @@ export class OrderApiError extends Error {
 
 const ORDER_ID = /^[A-Za-z0-9_]{8,64}$/;
 
+const ERRORS: Record<string, string> = {
+  bucket_unavailable: "That amount is sold out right now. Try a smaller one.",
+  busy: "Lots of orders open right now. Try again in a minute.",
+  no_price: "Prices are updating. Try again in a moment.",
+  invalid_bucket: "That amount is not offered.",
+  not_found: "Order not found",
+};
+
 function checkQuote(q: Quote, bucket: Bucket): Quote {
   if (!ORDER_ID.test(q.order_id)) throw new OrderApiError("server sent a malformed order id", 502);
   if (q.amount_zec !== bucket) throw new OrderApiError("server quoted a different amount than asked", 502);
@@ -45,10 +53,10 @@ async function call<T>(path: string, init?: RequestInit): Promise<T> {
     headers: init?.body ? { "content-type": "application/json" } : undefined,
   });
   if (!res.ok) {
-    let msg = `order service answered ${res.status}`;
+    let msg = `Order service unavailable (${res.status})`;
     try {
       const body = (await res.json()) as { error?: string };
-      if (body.error) msg = body.error;
+      if (body.error) msg = ERRORS[body.error] ?? msg;
     } catch {}
     throw new OrderApiError(msg, res.status);
   }
@@ -58,6 +66,13 @@ async function call<T>(path: string, init?: RequestInit): Promise<T> {
 export async function createOrder(bucket: Bucket): Promise<Quote> {
   if (ORDER_API === "mock") return checkQuote(mock.create(bucket), bucket);
   return checkQuote(await call<Quote>("/orders", { method: "POST", body: JSON.stringify({ bucket_zec: bucket }) }), bucket);
+}
+
+/** Which amounts the payout inventory can cover right now. Missing buckets count as unavailable. */
+export async function getBuckets(): Promise<Record<string, boolean>> {
+  if (ORDER_API === "mock") return { "0.005": true, "0.01": true, "0.05": true };
+  const r = await call<{ buckets: { bucket_zec: string; available: boolean }[] }>("/buckets");
+  return Object.fromEntries(r.buckets.map((b) => [b.bucket_zec, b.available === true]));
 }
 
 /** `null` once the server has forgotten the order (404 after payout). */

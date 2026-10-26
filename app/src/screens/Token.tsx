@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { tokens, toRef, ultraOrder, usdPrice, isStock, type JupToken } from "../lib/jupiter.ts";
+import { getBuckets } from "../lib/orders.ts";
 import { BUCKETS, MOCK, SOL_MINT, SWAP_RESERVE_LAMPORTS, ZEC_MINT, type Bucket } from "../lib/config.ts";
 import { buyWarnings } from "../lib/coach.ts";
 import { ago, amount, compact, pct, price, usd, units } from "../lib/format.ts";
@@ -95,6 +96,25 @@ function BuySheet({ open, onClose, t }: { open: boolean; onClose: () => void; t:
   const zec = usePrice(ZEC_MINT);
   const sol = usePrice(SOL_MINT);
   const [bucket, setBucket] = useState<Bucket>("0.01");
+  const [available, setAvailable] = useState<Record<string, boolean> | null>(null);
+
+  useEffect(() => {
+    if (!open) return;
+    let live = true;
+    getBuckets().then(
+      (b) => {
+        if (!live) return;
+        setAvailable(b);
+        // Keep the choice if it is offered, else fall back to the smallest one that is.
+        setBucket((cur) => (b[cur] ? cur : (BUCKETS.find((x) => b[x]) ?? cur)));
+      },
+      () => live && setAvailable(null),
+    );
+    return () => {
+      live = false;
+    };
+  }, [open]);
+  const noneAvailable = available !== null && !BUCKETS.some((b) => available[b]);
   const [estimate, setEstimate] = useState<number | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -141,7 +161,7 @@ function BuySheet({ open, onClose, t }: { open: boolean; onClose: () => void; t:
       </div>
       <div className="chips" role="group" aria-label="Amount">
         {BUCKETS.map((b) => (
-          <button key={b} className="chip" aria-pressed={bucket === b} onClick={() => setBucket(b)}>
+          <button key={b} className="chip" aria-pressed={bucket === b} disabled={available !== null && !available[b]} onClick={() => setBucket(b)}>
             <strong>{b}</strong>
             <span>ZEC{zec ? ` · ${usd(Number(b) * zec)}` : ""}</span>
           </button>
@@ -156,9 +176,10 @@ function BuySheet({ open, onClose, t }: { open: boolean; onClose: () => void; t:
         <div className="kv"><span>Goes to</span><span>A new wallet, only on this phone</span></div>
       </div>
       <Warnings items={warnings} />
+      {noneAvailable && <p className="err">Buying is paused while the payout wallet refills. Try again soon.</p>}
       {error && <p className="err">{error}</p>}
       <div className="spacer" />
-      <button className="btn" onClick={buy} disabled={busy}>
+      <button className="btn" onClick={buy} disabled={busy || noneAvailable || (available !== null && !available[bucket])}>
         {busy ? <Spinner /> : null} {MOCK ? "Continue (demo, no money moves)" : "Continue to payment"}
       </button>
       <p className="faint center">A small part of the payout stays in the wallet to cover fees and a later sale.</p>

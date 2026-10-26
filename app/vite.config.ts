@@ -7,7 +7,13 @@ import { handleImg, handleJup, handleRpc, type RelayEnv } from "./api/_relay.ts"
 // ones so a build can be checked under the real CSP before deploying.
 type VercelHeaders = { headers: { source: string; headers: { key: string; value: string }[] }[] };
 const vercel = JSON.parse(readFileSync(new URL("./vercel.json", import.meta.url), "utf8")) as VercelHeaders;
-const previewHeaders = Object.fromEntries((vercel.headers.find((h) => h.source === "/(.*)")?.headers ?? []).map((h) => [h.key, h.value]));
+const previewHeaders = Object.fromEntries(
+  (vercel.headers.find((h) => h.source === "/(.*)")?.headers ?? []).map((h) => [
+    h.key,
+    // Locally the order service may be a plain-http worker on loopback.
+    h.key === "Content-Security-Policy" ? h.value.replace("connect-src 'self' https:", "connect-src 'self' https: http://127.0.0.1:* http://localhost:*") : h.value,
+  ]),
+);
 
 /** Runs the same relay code as the Vercel functions (api/) under `vite` and `vite preview`. */
 function relay(env: RelayEnv): Plugin {
