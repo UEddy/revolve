@@ -1,8 +1,8 @@
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
+import type { IncomingMessage, ServerResponse } from "node:http";
 import { resolve } from "node:path";
+import { pathToFileURL } from "node:url";
 import { defineConfig, loadEnv, type Plugin } from "vite";
-import { createRelay } from "../relay/src/relay.ts";
-import { toNode } from "../relay/src/node.ts";
 import { checkBuildEnv, type BuildTargets } from "./build-env.ts";
 import { stripDotfiles } from "./build-dist.ts";
 
@@ -18,14 +18,30 @@ const previewHeaders = Object.fromEntries(
   ]),
 );
 
-/** `npm run dev` only: the relay (../relay) mounted at /api, so dev needs no second process. */
+// The parts of ../relay the dev server uses. Declared here rather than
+// imported so app/ type-checks and builds on its own (Vercel deploys app/
+// alone, without ../relay).
+type FetchHandler = (req: Request) => Promise<Response>;
+type RelayModule = { createRelay(env: { SOLANA_RPC_URL?: string; JUP_API_KEY?: string }, state: undefined, prefix: string): FetchHandler };
+type NodeModule = { toNode(handler: FetchHandler): (req: IncomingMessage, res: ServerResponse) => void };
+
+/**
+ * `npm run dev` only: the relay (../relay) mounted at /api, so dev needs no
+ * second process. Loaded at runtime from a computed path, so neither the
+ * build nor the type check ever resolves ../relay.
+ */
 function devRelay(env: Record<string, string>): Plugin {
-  const handle = toNode(createRelay({ SOLANA_RPC_URL: env.SOLANA_RPC_URL, JUP_API_KEY: env.JUP_API_KEY }, undefined, "/api"));
   return {
     name: "revolve-dev-relay",
     apply: "serve",
-    configureServer: (s) =>
-      void s.middlewares.use((req, res, next) => (req.url?.startsWith("/api/") ? handle(req, res) : next())),
+    async configureServer(server) {
+      const dir = resolve(server.config.root, "../relay/src");
+      if (!existsSync(dir)) throw new Error(`npm run dev needs the relay next to the app (${dir}); run it from the repo checkout`);
+      const load = <T,>(file: string) => import(pathToFileURL(resolve(dir, file)).href) as Promise<T>;
+      const [{ createRelay }, { toNode }] = await Promise.all([load<RelayModule>("relay.ts"), load<NodeModule>("node.ts")]);
+      const handle = toNode(createRelay({ SOLANA_RPC_URL: env.SOLANA_RPC_URL, JUP_API_KEY: env.JUP_API_KEY }, undefined, "/api"));
+      server.middlewares.use((req, res, next) => (req.url?.startsWith("/api/") ? handle(req, res) : next()));
+    },
   };
 }
 
@@ -64,7 +80,7 @@ export default defineConfig(({ command, mode }) => {
   // Fails `vite build` on demo mode, a missing service, or plain http.
   const targets = command === "build" ? checkBuildEnv(mode, { ...env, ...process.env }) : null;
   return {
-    plugins: [devRelay(env), noDotfiles(), ...(targets ? [narrowCsp(targets)] : [])],
+    plugins: [...(command === "serve" ? [devRelay(env)] : []), noDotfiles(), ...(targets ? [narrowCsp(targets)] : [])],
     build: { target: "es2022", sourcemap: false },
     server: { port: 5180, strictPort: true, host: true },
     preview: { port: 4180, strictPort: true, host: true, headers: previewHeaders },
