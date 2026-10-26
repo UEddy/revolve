@@ -1,0 +1,28 @@
+# systemd unit for the order API + payout worker. The worker starts the Rust
+# watcher as its child (WATCHER_BIN), so both live in this unit's cgroup.
+[Unit]
+Description=Revolve order API, payout worker and watcher
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+User=revolve
+WorkingDirectory=/opt/revolve/worker
+Environment=WORKER_ENV_FILE=/opt/revolve/worker/.env
+Environment=HOME=/opt/revolve
+ExecStart=/usr/bin/node src/main.ts
+Restart=always
+RestartSec=5
+# 512 MB droplet shared with the relay (128M). Swap absorbs sync spikes.
+MemoryHigh=220M
+MemoryMax=320M
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+PrivateDevices=yes
+ReadWritePaths=/opt/revolve/worker/data /opt/revolve/solver/data
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6 AF_NETLINK
+
+[Install]
+WantedBy=multi-user.target
