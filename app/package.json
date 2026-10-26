@@ -12,7 +12,7 @@
     "typecheck": "tsc -p tsconfig.json && tsc -p tsconfig.node.json",
     "build": "npm run typecheck && vite build",
     "preview": "vite preview",
-    "test": "node --test \"src/**/*.test.ts\" build-env.test.ts"
+    "test": "node --test \"src/**/*.test.ts\" build-env.test.ts build-dist.test.ts"
   },
   "dependencies": {
     "@fontsource/besley": "5.3.0",

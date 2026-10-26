@@ -15,6 +15,8 @@ VITE_ORDER_API=https://api.example VITE_RELAY_URL=https://relay.example npm run 
 
 The deploy is static files only (`dist/`, `vercel.json` sets the headers). The relay runs on the droplet (`../relay`).
 
+Vercel: link the project from `app/` itself (build command `npm run build`, output `dist`), so the build guard below runs on every deploy. Never link or deploy `public/` or `dist/` directly. As a second guard, every build strips dotfiles and dot-directories from `dist/` (`build-dist.ts`; `.well-known` is kept), so tool metadata such as a `.vercel` link is never served.
+
 Settings (`.env.example`):
 
 | Variable | Where | What |
