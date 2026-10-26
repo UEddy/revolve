@@ -3,17 +3,25 @@
 # ~/revolve-secrets/deploy (mode 700): the three env files and a snapshot of the
 # watcher and worker databases. Prints no secrets.
 #
-#   worker/deploy/stage.sh <app origin, e.g. https://revolve-xyz.vercel.app>
+#   SOLANA_RPC_URL=<private https RPC> worker/deploy/stage.sh <app origin, e.g. https://revolve-xyz.vercel.app>
+#
+# SOLANA_RPC_URL comes only from the environment (it carries an API key) and is
+# written only to the staged env files, never inside the repo.
 set -euo pipefail
 
 APP_ORIGIN=${1:?usage: stage.sh <app origin>}
 case "$APP_ORIGIN" in https://*) ;; *) echo "app origin must be https://..." >&2; exit 1 ;; esac
 APP_ORIGIN=${APP_ORIGIN%/}
 
+RPC=${SOLANA_RPC_URL:?set SOLANA_RPC_URL in the environment (private https RPC for worker and relay)}
+case "$RPC" in https://*) ;; *) echo "SOLANA_RPC_URL must be https://..." >&2; exit 1 ;; esac
+
 REPO=$(cd "$(dirname "$0")/../.." && pwd)
 OUT=${STAGE_DIR:-$HOME/revolve-secrets/deploy}
-BIN=$REPO/solver/target/release/revolve-watcher
+OUT=$(realpath -m "$OUT")
+case "$OUT/" in "$(realpath "$REPO")/"*) echo "staging dir must be outside the repo" >&2; exit 1 ;; esac
 umask 077
+BIN=$REPO/solver/target/release/revolve-watcher
 mkdir -p "$OUT/state"
 
 # Orchard-only key: the transparent and Sapling parts never reach the server.
@@ -38,7 +46,7 @@ DEPOSIT_UA=$UA
 DB_PATH=/opt/revolve/worker/data/worker.sqlite
 WATCHER_BIN=/opt/revolve/solver/revolve-watcher
 WATCHER_ENV_FILE=/opt/revolve/solver/.env
-SOLANA_RPC_URL=https://api.mainnet-beta.solana.com
+SOLANA_RPC_URL=$RPC
 SOLANA_KEYPAIR_PATH=/opt/revolve/secrets/hotwallet.json
 SOL_RESERVE_LAMPORTS=10000000
 LAMPORTS_PER_ZEC=
@@ -52,7 +60,7 @@ cat > "$OUT/relay.env" <<EOF
 APP_ORIGIN=$APP_ORIGIN
 PORT=8788
 HOST=127.0.0.1
-SOLANA_RPC_URL=
+SOLANA_RPC_URL=$RPC
 JUP_API_KEY=
 EOF
 

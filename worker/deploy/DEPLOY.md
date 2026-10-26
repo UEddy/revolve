@@ -48,7 +48,9 @@ sleep 3; pgrep -x revolve-watcher || echo "local worker and watcher stopped"
 cd ~/revolve && git pull --rebase --autostash
 cd solver && cargo build --release && cd ..
 objdump -T solver/target/release/revolve-watcher | grep -oE 'GLIBC_[0-9.]+' | sort -Vu | tail -1   # needs <= droplet glibc (D3)
+read -rsp 'Solana RPC URL: ' SOLANA_RPC_URL && export SOLANA_RPC_URL && echo   # private https RPC; kept out of shell history
 worker/deploy/stage.sh https://<APP_ORIGIN>     # the app's exact https origin; prints no secrets
+unset SOLANA_RPC_URL
 ```
 
 ## D3 [droplet] Base setup: user, directories, Node 24
