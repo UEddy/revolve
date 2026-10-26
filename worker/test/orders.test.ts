@@ -119,3 +119,59 @@ test("expired in-flight payout can be retried", () => {
   book.retryPayout(o.order_id);
   assert.equal(book.due().length, 1);
 });
+
+test("a payout can be claimed by only one process", () => {
+  const { book } = setup();
+  const o = book.create("0.01", 1n, 1800);
+  book.onNote(note(`rv1|${o.order_id}|${burner}`, 1_000_000, 20));
+  assert.equal(book.markPaying(o.order_id, "first", 50), true);
+  assert.equal(book.markPaying(o.order_id, "second", 50), false);
+  assert.equal(book.inFlight()[0].signature, "first");
+});
+
+test("review note confirmations follow re-emitted lines", () => {
+  const { book } = setup();
+  book.onNote(note("Love", 500_000, 1));
+  book.onNote(note("Love", 500_000, 4));
+  assert.deepEqual(book.reviewNotes().map((n) => [n.reason, n.confirmations]), [["malformed_memo", 4]]);
+});
+
+test("bind a review note to an expired order's quote, pay once", () => {
+  const { book, advance } = setup();
+  const o = book.create("0.005", 65_000_000n, 60);
+  advance(61_000);
+  book.expire();
+  book.onNote(note("Love", 500_000, 5));
+  const key = book.reviewNotes()[0].note_key;
+
+  const id = book.bindReviewNote(key, burner, { orderId: o.order_id });
+  assert.equal(id, o.order_id);
+  assert.deepEqual(book.reviewNotes(), []);
+  assert.deepEqual(book.due(), [{ orderId: o.order_id, burner, lamports: 65_000_000n }]);
+  assert.throws(() => book.bindReviewNote(key, burner, { lamports: 1n }), /no such review note/);
+
+  // The re-emitted line now belongs to the order and is not reviewed again.
+  book.onNote(note("Love", 500_000, 6));
+  assert.deepEqual(book.reviewNotes(), []);
+  book.markPaying(id, "s", 1);
+  book.markPaid(id, "s");
+  book.onNote(note("Love", 500_000, 7));
+  assert.deepEqual(book.reviewNotes(), [], "settled note stays settled");
+});
+
+test("bind refuses an order that already has a note", () => {
+  const { book } = setup();
+  const o = book.create("0.005", 1n, 1800);
+  book.onNote(note(`rv1|${o.order_id}|${burner}`, 500_000, 5, "aa".repeat(32)));
+  book.onNote(note("Love", 500_000, 5, "bb".repeat(32)));
+  const key = book.reviewNotes()[0].note_key;
+  assert.throws(() => book.bindReviewNote(key, burner, { orderId: o.order_id }), /must exist, be unpaid/);
+  assert.equal(book.reviewNotes().length, 1, "rolled back");
+});
+
+test("bind with explicit lamports creates an internal order", () => {
+  const { book } = setup();
+  book.onNote(note("Love", 50_000, 5));
+  const id = book.bindReviewNote(book.reviewNotes()[0].note_key, burner, { lamports: 7n });
+  assert.deepEqual(book.due(), [{ orderId: id, burner, lamports: 7n }]);
+});

@@ -41,16 +41,18 @@ export class Payer {
  * signature before broadcast, so a crash or timeout is resolved by looking the
  * signature up, never by sending a second transfer.
  */
-export async function runPayouts(book: OrderBook, payer: Payer, reserve: bigint): Promise<void> {
+export async function runPayouts(book: OrderBook, payer: Payer, reserve: bigint, onlyOrderId?: string): Promise<void> {
   await reconcile(book, payer);
   for (const due of book.due()) {
+    if (onlyOrderId !== undefined && due.orderId !== onlyOrderId) continue;
     const balance = await payer.refreshBalance();
     if (balance < due.lamports + reserve) {
       console.error("payout waiting: hot wallet below payout plus reserve");
       return;
     }
     const tx = await payer.build(due.burner, due.lamports);
-    book.markPaying(due.orderId, tx.signature, tx.lastValidBlockHeight);
+    // Another process (worker or admin CLI) may have claimed it; never send then.
+    if (!book.markPaying(due.orderId, tx.signature, tx.lastValidBlockHeight)) continue;
     try {
       await payer.conn.sendRawTransaction(tx.raw, { maxRetries: 5 });
       const res = await payer.conn.confirmTransaction(
