@@ -1,0 +1,33 @@
+# /etc/caddy/Caddyfile on the droplet. Replaces the whole file.
+#
+#   https://revolveapp.duckdns.org/orders, /orders/<id>, /buckets -> worker (127.0.0.1:8787)
+#   https://revolveapp.duckdns.org/relay/*                         -> relay  (127.0.0.1:8788), prefix stripped
+#   anything else                                                  -> 404
+#
+# The app is built with
+#   VITE_ORDER_API=https://revolveapp.duckdns.org
+#   VITE_RELAY_URL=https://revolveapp.duckdns.org/relay
+#
+# No `log` directive on purpose: Caddy keeps no access logs unless told to, so
+# client IPs are never recorded. The client IP is also not forwarded upstream.
+
+revolveapp.duckdns.org {
+	@worker path /orders /orders/* /buckets
+	handle @worker {
+		reverse_proxy 127.0.0.1:8787 {
+			header_up -X-Forwarded-For
+			header_up -X-Real-IP
+		}
+	}
+
+	handle_path /relay/* {
+		reverse_proxy 127.0.0.1:8788 {
+			header_up -X-Forwarded-For
+			header_up -X-Real-IP
+		}
+	}
+
+	handle {
+		respond 404
+	}
+}
