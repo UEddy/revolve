@@ -1,0 +1,61 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="referrer" content="no-referrer">
+<title>Revolve · Spike B</title>
+<link rel="stylesheet" href="/spike-b.css">
+</head>
+<body>
+<main>
+  <h1>Spike B</h1>
+  <p class="lead">Two checks on the phone: passkey PRF works, and a <code>zcash:</code> link opens Zodl with amount and memo filled. Nothing here talks to a server.</p>
+
+  <section>
+    <h2>1 · Passkey PRF</h2>
+    <div id="prf-verdict" class="verdict">Not run yet</div>
+    <button id="btn-env" class="ghost">Check this browser</button>
+    <button id="btn-create">Create test passkey (with PRF)</button>
+    <div class="row">
+      <button id="btn-eval">Evaluate PRF</button>
+      <button id="btn-eval-disc" class="ghost">Evaluate (pick passkey)</button>
+    </div>
+    <p class="small">Run Evaluate twice. A pass is a 32 byte output that is the same both times. Only a short fingerprint of the output is shown.</p>
+    <pre id="prf-log">…</pre>
+  </section>
+
+  <section>
+    <h2>2 · ZIP-321 link to Zodl</h2>
+    <label for="ua">Deposit address (unified, Orchard receiver)</label>
+    <textarea id="ua" placeholder="u1…" spellcheck="false"></textarea>
+    <div class="row">
+      <div><label for="amount">Amount ZEC</label><input id="amount" value="0.005" inputmode="decimal"></div>
+      <div><label for="order">Order id</label><input id="order" value="rv_spike0001"></div>
+    </div>
+    <label for="memo">Memo (rv1|order_id|burner_pubkey)</label>
+    <textarea id="memo" spellcheck="false"></textarea>
+    <pre id="link-out">…</pre>
+    <a id="open-main" class="btn" href="#">Pay with Zodl (memo base64url, no padding)</a>
+    <a id="open-pad" class="btn ghost" href="#">Variant: memo with = padding</a>
+    <a id="open-param" class="btn ghost" href="#">Variant: address as ?address= param</a>
+    <button id="btn-copy" class="ghost">Copy link</button>
+    <p class="small">Do not confirm the send in Zodl unless the address is the real solver address and you mean to pay.</p>
+  </section>
+
+  <section>
+    <h2>3 · Report</h2>
+    <label class="check"><input type="checkbox" data-k="zodl_opened"> Zodl opened from the link</label>
+    <label class="check"><input type="checkbox" data-k="address_filled"> Address filled</label>
+    <label class="check"><input type="checkbox" data-k="amount_filled"> Amount filled and correct</label>
+    <label class="check"><input type="checkbox" data-k="memo_filled"> Memo filled and matches the text above</label>
+    <label class="check"><input type="checkbox" data-k="memo_editable_locked"> Memo shown read-only (not editable)</label>
+    <label for="variant">Which link worked</label>
+    <input id="variant" placeholder="main / padding / address param / none">
+    <button id="btn-report">Copy report</button>
+    <pre id="report-out">…</pre>
+  </section>
+</main>
+<script src="/spike-b.js"></script>
+</body>
+</html>

@@ -1,0 +1,70 @@
+// Passkey with the WebAuthn PRF extension. The PRF output never leaves this
+// module except as a non-extractable AES key (vault.ts). No user name, no
+// email: the passkey is labelled "Revolve vault" and its user id is random.
+
+import { b64url, fromB64url, random, utf8 } from "./bytes.ts";
+
+export class PrfUnsupported extends Error {
+  constructor(detail: string) {
+    super(`This phone's passkeys cannot derive an encryption key (${detail}). Revolve needs Android Chrome or a recent iPhone.`);
+  }
+}
+
+let saltCache: Uint8Array<ArrayBuffer> | null = null;
+async function prfSalt(): Promise<Uint8Array<ArrayBuffer>> {
+  saltCache ??= new Uint8Array(await crypto.subtle.digest("SHA-256", utf8.encode("revolve/vault/prf-salt/v1")));
+  return saltCache;
+}
+
+export function passkeysAvailable(): boolean {
+  return typeof window !== "undefined" && window.isSecureContext && typeof PublicKeyCredential !== "undefined";
+}
+
+type PrfExt = { prf?: { enabled?: boolean; results?: { first?: BufferSource } } };
+
+function firstOutput(ext: PrfExt): Uint8Array<ArrayBuffer> | null {
+  const first = ext.prf?.results?.first;
+  if (!first) return null;
+  const bytes = first instanceof ArrayBuffer ? new Uint8Array(first) : new Uint8Array(first.buffer, first.byteOffset, first.byteLength).slice();
+  return bytes.length === 32 ? bytes : null;
+}
+
+/** Creates the vault passkey. Returns its id, and the PRF output when the authenticator gives one at creation. */
+export async function createPasskey(): Promise<{ credId: string; prf: Uint8Array<ArrayBuffer> | null }> {
+  if (!passkeysAvailable()) throw new PrfUnsupported("no passkey support in this browser");
+  const cred = (await navigator.credentials.create({
+    publicKey: {
+      rp: { name: "Revolve" },
+      user: { id: random(16), name: "Revolve vault", displayName: "Revolve vault" },
+      challenge: random(32),
+      pubKeyCredParams: [
+        { type: "public-key", alg: -7 },
+        { type: "public-key", alg: -257 },
+      ],
+      authenticatorSelection: { residentKey: "required", userVerification: "required" },
+      attestation: "none",
+      extensions: { prf: { eval: { first: await prfSalt() } } } as AuthenticationExtensionsClientInputs,
+    },
+  })) as PublicKeyCredential | null;
+  if (!cred) throw new Error("Passkey creation was cancelled");
+  const ext = cred.getClientExtensionResults() as PrfExt;
+  if (ext.prf?.enabled === false || ext.prf === undefined) throw new PrfUnsupported("PRF not enabled on the new passkey");
+  return { credId: b64url(new Uint8Array(cred.rawId)), prf: firstOutput(ext) };
+}
+
+/** Asks the passkey for the vault's PRF output. `credId` null lets the phone offer any Revolve passkey. */
+export async function evalPrf(credId: string | null): Promise<{ credId: string; prf: Uint8Array<ArrayBuffer> }> {
+  if (!passkeysAvailable()) throw new PrfUnsupported("no passkey support in this browser");
+  const assertion = (await navigator.credentials.get({
+    publicKey: {
+      challenge: random(32),
+      userVerification: "required",
+      allowCredentials: credId ? [{ type: "public-key", id: fromB64url(credId) as Uint8Array<ArrayBuffer> }] : [],
+      extensions: { prf: { eval: { first: await prfSalt() } } } as AuthenticationExtensionsClientInputs,
+    },
+  })) as PublicKeyCredential | null;
+  if (!assertion) throw new Error("Unlock was cancelled");
+  const prf = firstOutput(assertion.getClientExtensionResults() as PrfExt);
+  if (!prf) throw new PrfUnsupported("the passkey returned no PRF output");
+  return { credId: b64url(new Uint8Array(assertion.rawId)), prf };
+}
