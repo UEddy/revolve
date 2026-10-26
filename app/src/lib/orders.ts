@@ -68,11 +68,22 @@ export async function createOrder(bucket: Bucket): Promise<Quote> {
   return checkQuote(await call<Quote>("/orders", { method: "POST", body: JSON.stringify({ bucket_zec: bucket }) }), bucket);
 }
 
-/** Which amounts the payout inventory can cover right now. Missing buckets count as unavailable. */
-export async function getBuckets(): Promise<Record<string, boolean>> {
-  if (import.meta.env.DEV && ORDER_API === "mock") return { "0.005": true, "0.01": true, "0.05": true };
-  const r = await call<{ buckets: { bucket_zec: string; available: boolean }[] }>("/buckets");
-  return Object.fromEntries(r.buckets.map((b) => [b.bucket_zec, b.available === true]));
+export type BucketState = { loading: true } | { loading: false; available: Record<string, boolean> };
+
+/**
+ * Which amounts the payout inventory can cover right now. Missing buckets
+ * count as unavailable. A 503 means the worker is still loading its price
+ * and balance: that is "ask again soon", not "unavailable".
+ */
+export async function getBuckets(): Promise<BucketState> {
+  if (import.meta.env.DEV && ORDER_API === "mock") return { loading: false, available: { "0.005": true, "0.01": true, "0.05": true } };
+  try {
+    const r = await call<{ buckets: { bucket_zec: string; available: boolean }[] }>("/buckets");
+    return { loading: false, available: Object.fromEntries(r.buckets.map((b) => [b.bucket_zec, b.available === true])) };
+  } catch (e) {
+    if (e instanceof OrderApiError && e.status === 503) return { loading: true };
+    throw e;
+  }
 }
 
 /** `null` once the server has forgotten the order (404 after payout). */
