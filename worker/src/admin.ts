@@ -79,9 +79,14 @@ async function payOut(args: string[]) {
   await runPayouts(book, payer, cfg.solReserveLamports, orderId);
 
   const status = book.get(orderId);
-  console.log(`order ${orderId}: ${JSON.stringify(status)}`);
-  if (status?.status !== "paid_out") {
-    console.log("not paid yet; it stays confirmed or paying, and the worker will finish or reconcile it");
+  if (status === null) {
+    // The record is deleted on payout. The running worker can claim the order
+    // before we do; its signature is then served by GET /orders/<id> for a while.
+    console.log(`order ${orderId}: paid out by the running worker; signature via GET /orders/${orderId}`);
+  } else if (status.status === "paid_out") {
+    console.log(`order ${orderId}: paid out, signature ${status.payout_signature}`);
+  } else {
+    console.log(`order ${orderId}: ${status.status}; the worker will finish or reconcile the payout`);
   }
 }
 
