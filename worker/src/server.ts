@@ -31,6 +31,7 @@ export function createApi(deps: ServerDeps) {
         res.setHeader("Access-Control-Max-Age", "600");
         return send(res, 204);
       }
+      if (req.method === "GET" && path === "/buckets") return getBuckets(res, deps);
       if (req.method === "POST" && path === "/orders") return await postOrder(req, res, deps);
       const m = /^\/orders\/([^/]+)$/.exec(path);
       if (req.method === "GET" && m) {
@@ -42,6 +43,21 @@ export function createApi(deps: ServerDeps) {
       send(res, 500, { error: "internal" });
     }
   });
+}
+
+/** A bucket is available when there is a price and the hot wallet can cover its payout. */
+function payoutIfAvailable(deps: ServerDeps, bucketZat: bigint): bigint | null {
+  const payout = deps.quote(bucketZat);
+  const free = deps.freeInventory();
+  return payout !== null && free !== null && payout <= free ? payout : null;
+}
+
+function getBuckets(res: ServerResponse, deps: ServerDeps) {
+  const buckets = Object.entries(BUCKETS).map(([bucket_zec, zat]) => ({
+    bucket_zec,
+    available: payoutIfAvailable(deps, zat) !== null,
+  }));
+  send(res, 200, { buckets });
 }
 
 async function postOrder(req: IncomingMessage, res: ServerResponse, deps: ServerDeps) {
@@ -56,10 +72,9 @@ async function postOrder(req: IncomingMessage, res: ServerResponse, deps: Server
   if (bucketZat === undefined) return send(res, 400, { error: "invalid_bucket" });
   if (deps.book.openCount() >= deps.maxOpenOrders) return send(res, 503, { error: "busy" });
 
-  const payout = deps.quote(bucketZat);
-  if (payout === null) return send(res, 503, { error: "no_price" });
-  const free = deps.freeInventory();
-  if (free === null || payout > free) return send(res, 409, { error: "bucket_unavailable" });
+  if (deps.quote(bucketZat) === null) return send(res, 503, { error: "no_price" });
+  const payout = payoutIfAvailable(deps, bucketZat);
+  if (payout === null) return send(res, 409, { error: "bucket_unavailable" });
 
   const o = deps.book.create(bucket, payout, deps.quoteTtlSecs);
   send(res, 201, {
