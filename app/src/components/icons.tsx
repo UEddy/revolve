@@ -17,12 +17,18 @@ export const Eye = (p: P) => (<svg {...base} {...p}><path d="M2 12s3.6-7 10-7 10
 export const Lock = (p: P) => (<svg {...base} {...p}><rect x="4" y="10" width="16" height="11" rx="3" /><path d="M8 10V7a4 4 0 0 1 8 0v3" /></svg>);
 export const Spark = (p: P) => (<svg {...base} {...p}><path d="M12 3v4M12 17v4M3 12h4M17 12h4M6 6l2.5 2.5M15.5 15.5 18 18M6 18l2.5-2.5M15.5 8.5 18 6" /></svg>);
 
-/** The Revolve mark: a ring with one body in orbit around a shielded core. */
-export const Mark = (p: P) => (
-  <svg viewBox="0 0 64 64" {...p}>
-    <circle cx="32" cy="32" r="30" fill="var(--accent)" />
-    <path d="M32 12a20 20 0 1 1-17.3 10" fill="none" stroke="var(--on-accent)" strokeWidth="5" strokeLinecap="round" />
-    <circle cx="22" cy="14.7" r="3.4" fill="var(--on-accent)" />
-    <path d="M32 22 24 25v6c0 5 3.4 8.6 8 10 4.6-1.4 8-5 8-10v-6z" fill="var(--on-accent)" />
+/**
+ * The Revolve mark, drawn from src/assets/brand/revolve-mark-*.svg with theme
+ * tokens instead of fixed colours: ink ring, navy orbit (the lighter navy in
+ * dark mode), exactly as the kit's light and dark files. Inside a filled
+ * button it takes the text colour (styles.css).
+ */
+export const Mark = ({ className, ...p }: P) => (
+  <svg viewBox="0 0 100 100" className={`mark${className ? ` ${className}` : ""}`} aria-hidden {...p}>
+    <path className="mark-orbit" transform="translate(50 50) rotate(-24)" d="M-47 0A47 21 0 0 1 47 0" fill="none" strokeWidth="4.8" strokeLinecap="round" />
+    <circle className="mark-dot" transform="translate(50 50) rotate(-24)" cx="41.499" cy="-9.859" r="5.6" />
+    <path className="mark-ring" d="M74.259 67.649A30 30 0 0 1 46.883 79.838" fill="none" strokeWidth="12" />
+    <path className="mark-ring" d="M26.371 68.485A30 30 0 1 1 79.548 44.809" fill="none" strokeWidth="12" />
+    <path className="mark-orbit" transform="translate(50 50) rotate(-24)" d="M47 0A47 21 0 0 1 -47 0" fill="none" strokeWidth="4.8" strokeLinecap="round" />
   </svg>
 );

@@ -2,8 +2,8 @@
 
 import { useRef, useState } from "react";
 import { useVault } from "../state/vault.tsx";
-import { Mark, Shield, Key, Eye, Lock } from "../components/icons.tsx";
-import { Spinner, errorText } from "../components/bits.tsx";
+import { Shield, Key, Eye, Lock } from "../components/icons.tsx";
+import { Spinner, Wordmark, errorText } from "../components/bits.tsx";
 import { passkeysAvailable } from "../lib/passkey.ts";
 
 function useAction() {
@@ -52,7 +52,7 @@ export function Welcome() {
   const supported = passkeysAvailable();
   return (
     <div className="welcome">
-      <Mark className="mark" />
+      <Wordmark height={44} />
       <h1>Buy anything with shielded ZEC.</h1>
       <p className="muted" style={{ fontSize: 17, margin: 0 }}>
         Tokens and stocks, paid from Zodl, landing in wallets nobody can trace back to you.
@@ -81,7 +81,7 @@ export function Unlock() {
   const { busy, error, run } = useAction();
   return (
     <div className="welcome" style={{ justifyContent: "center", textAlign: "center", alignItems: "center" }}>
-      <Mark className="mark" />
+      <Wordmark height={44} />
       <h1 style={{ fontSize: 30 }}>Welcome back</h1>
       <p className="muted" style={{ marginTop: 0 }}>Your wallets are sealed on this phone. Your passkey opens them.</p>
       <div className="spacer" />

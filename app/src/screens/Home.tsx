@@ -8,8 +8,8 @@ import { SOL_MINT } from "../lib/config.ts";
 import { amount, usd, units, ago } from "../lib/format.ts";
 import type { Position } from "../lib/model.ts";
 import { href } from "../router.ts";
-import { Meter, Spinner, TokenIcon } from "../components/bits.tsx";
-import { Lock, Mark } from "../components/icons.tsx";
+import { Meter, Spinner, TokenIcon, Wordmark } from "../components/bits.tsx";
+import { Lock } from "../components/icons.tsx";
 
 const PENDING_TEXT: Partial<Record<Position["stage"], string>> = {
   awaiting_payment: "Waiting for your payment",
@@ -40,8 +40,9 @@ export function Home() {
   return (
     <div className="screen">
       <div className="row" style={{ marginBottom: 6 }}>
-        <Mark style={{ width: 32, height: 32 }} />
-        <span className="display grow" style={{ fontSize: 20 }}>Revolve</span>
+        <span className="grow">
+          <Wordmark height={28} />
+        </span>
         <button className="icon-btn" onClick={lock} aria-label="Lock">
           <Lock />
         </button>
