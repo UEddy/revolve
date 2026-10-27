@@ -19,6 +19,8 @@ export const RELAY = env?.VITE_RELAY_URL?.trim().replace(/\/$/, "") || "/api";
 
 
 export const SOL_MINT = "So11111111111111111111111111111111111111112";
+/** Wormhole ETH on Solana: its Jupiter price stands in for ETH/USD (Ethereum and Robinhood Chain NFT floors). */
+export const ETH_MINT = "7vfCXTUXx5WJV5JADk17DUJ4ksgau7utNKj4b963voxs";
 export const ZEC_MINT = "A7bdiYdS5GjqGFtxf17ppRHtDKPkkRqbKtR27dxvQXaS";
 
 /** Lamports kept in the burner after the swap: fees, the new token account's rent, and enough to sell later. */

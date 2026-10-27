@@ -22,7 +22,7 @@ const previewHeaders = Object.fromEntries(
 // imported so app/ type-checks and builds on its own (Vercel deploys app/
 // alone, without ../relay).
 type FetchHandler = (req: Request) => Promise<Response>;
-type RelayModule = { createRelay(env: { SOLANA_RPC_URL?: string; JUP_API_KEY?: string }, state: undefined, prefix: string): FetchHandler };
+type RelayModule = { createRelay(env: { SOLANA_RPC_URL?: string; JUP_API_KEY?: string; OPENSEA_API_KEY?: string }, state: undefined, prefix: string): FetchHandler };
 type NodeModule = { toNode(handler: FetchHandler): (req: IncomingMessage, res: ServerResponse) => void };
 
 /**
@@ -39,7 +39,7 @@ function devRelay(env: Record<string, string>): Plugin {
       if (!existsSync(dir)) throw new Error(`npm run dev needs the relay next to the app (${dir}); run it from the repo checkout`);
       const load = <T,>(file: string) => import(pathToFileURL(resolve(dir, file)).href) as Promise<T>;
       const [{ createRelay }, { toNode }] = await Promise.all([load<RelayModule>("relay.ts"), load<NodeModule>("node.ts")]);
-      const handle = toNode(createRelay({ SOLANA_RPC_URL: env.SOLANA_RPC_URL, JUP_API_KEY: env.JUP_API_KEY }, undefined, "/api"));
+      const handle = toNode(createRelay({ SOLANA_RPC_URL: env.SOLANA_RPC_URL, JUP_API_KEY: env.JUP_API_KEY, OPENSEA_API_KEY: env.OPENSEA_API_KEY }, undefined, "/api"));
       server.middlewares.use((req, res, next) => (req.url?.startsWith("/api/") ? handle(req, res) : next()));
     },
   };

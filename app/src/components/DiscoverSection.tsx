@@ -4,11 +4,11 @@
 // and a one-time swipe hint.
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { CATEGORIES, loadCards, pageAt, type Card, type Category } from "../lib/discover.ts";
+import { CATEGORIES, CHAIN_LABEL, CHAIN_SHORT, loadCards, nftChain, nftId, nftUsd, pageAt, type Card, type Category } from "../lib/discover.ts";
 import { compact, pct, price, shortPrice, usd } from "../lib/format.ts";
 import { href } from "../router.ts";
 import { useEngine } from "../state/engine.tsx";
-import { SOL_MINT } from "../lib/config.ts";
+import { ETH_MINT, SOL_MINT } from "../lib/config.ts";
 import { TokenIcon } from "./bits.tsx";
 import { Back } from "./icons.tsx";
 
@@ -49,7 +49,7 @@ function readHinted(): boolean {
   }
 }
 
-function CardView({ card, solUsd }: { card: Card; solUsd: number | undefined }) {
+function CardView({ card, prices }: { card: Card; prices: Record<string, number> }) {
   if (card.kind === "token") {
     const t = card.token;
     const ch = t.stats24h?.priceChange;
@@ -76,10 +76,13 @@ function CardView({ card, solUsd }: { card: Card; solUsd: number | undefined }) 
     );
   }
   const n = card.nft;
-  const floorUsd = n.floor && solUsd !== undefined ? (Number(n.floor) / 1e9) * solUsd : null;
+  const floorUsd = nftUsd(n.floor, n.floorUnit, prices);
   return (
-    <a className="dsc-card" href={href.nft(n.symbol)}>
-      <TokenIcon src={n.image} symbol={n.name} />
+    <a className="dsc-card" href={href.nft(nftId(n))}>
+      <span className="dsc-top">
+        <TokenIcon src={n.image} symbol={n.name} />
+        <span className="dsc-chain" title={CHAIN_LABEL[nftChain(n)]}>{CHAIN_SHORT[nftChain(n)]}</span>
+      </span>
       <span className="dsc-name dsc-two">{n.name}</span>
       <span className="dsc-num num">{floorUsd === null ? "…" : usd(floorUsd)}</span>
       <span className="dsc-sub">Floor{n.listed !== null ? ` · ${compact(n.listed)} listed` : ""}</span>
@@ -104,6 +107,9 @@ export function DiscoverSection() {
   const pages = Math.max(1, Math.ceil(count / 3));
 
   useEffect(() => priceOf(SOL_MINT), [priceOf]);
+  useEffect(() => {
+    if (cat === "nfts") priceOf(ETH_MINT);
+  }, [cat, priceOf]);
   useEffect(() => {
     try {
       sessionStorage.setItem("rv.dsc", cat);
@@ -162,7 +168,7 @@ export function DiscoverSection() {
               {cards
                 ? cards.map((c) => (
                     <div key={`${c.kind}:${c.id}`} role="listitem" className="dsc-slot">
-                      <CardView card={c} solUsd={prices[SOL_MINT]} />
+                      <CardView card={c} prices={prices} />
                     </div>
                   ))
                 : Array.from({ length: 4 }, (_, i) => (

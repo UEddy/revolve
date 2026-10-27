@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { nftList, projectNft, projectPolymarket } from "../src/feeds.ts";
-import { createRelay, DEFAULT_NFTS, handleFeed, newState } from "../src/relay.ts";
+import { nftList, projectNft, projectOpenSea, projectPolymarket, toBase } from "../src/feeds.ts";
+import { createRelay, DEFAULT_NFTS, handleFeed, newState, OPENSEA_NFTS } from "../src/relay.ts";
 
 const negRisk = {
   id: 1, title: "Fed Decision in October?", image: "https://x.test/fed.png", volume24hr: 7_188_822, endDate: "2026-10-29T03:59:00Z", negRisk: true,
@@ -66,7 +66,8 @@ test("nft list: defaults, env override, bad symbols dropped", () => {
 test("nft card: stats required, metadata optional", () => {
   const entry = { symbol: "mad_lads", name: "Mad Lads" };
   assert.deepEqual(projectNft(entry, null, { floorPrice: 7199000000, listedCount: 204, volume7d: 232970865000 }), {
-    symbol: "mad_lads", name: "Mad Lads", image: undefined, floor: "7199000000", listed: 204, volume7d: "232970865000",
+    symbol: "mad_lads", name: "Mad Lads", image: undefined, chain: "solana",
+    floor: "7199000000", floorUnit: "SOL", listed: 204, owners: null, volume7d: "232970865000", volumeUnit: "SOL",
   });
   assert.equal(projectNft(entry, { name: "MAD LADS", image: "https://img.test/m.png" }, { floorPrice: 1 })!.image, "https://img.test/m.png");
   assert.equal(projectNft(entry, { image: "http://insecure.test/x.png" }, { floorPrice: 1 })!.image, undefined);
@@ -130,6 +131,73 @@ test("feed routes over the relay: GET only, no client headers upstream", async (
     assert.deepEqual([...f.calls[0]!.headers.keys()], ["accept"]);
     assert.equal((await relay(new Request("https://relay.test/feeds/markets", { method: "POST", body: "{}" }))).status, 405);
     assert.equal((await relay(new Request("https://relay.test/feeds/other"))).status, 404);
+  } finally {
+    f.restore();
+  }
+});
+
+// Shaped like OpenSea's /collections/:slug/stats.
+const osStats = (floor: number, symbol: string, week: number | null = 12.5) => ({
+  total: { volume: 1_000, volume_symbol: "ETH", sales: 10, num_owners: 3826, floor_price: floor, floor_price_symbol: symbol },
+  intervals: [
+    { interval: "one_day", volume: 1, volume_symbol: "ETH", sales: 1 },
+    ...(week === null ? [] : [{ interval: "seven_day", volume: week, volume_symbol: "ETH", sales: 3 }]),
+  ],
+});
+
+test("decimal amounts to base units: wei kept to gwei, micro-dollars, nothing for zero or junk", () => {
+  assert.equal(toBase(30.25, "ETH"), "30250000000000000000");
+  assert.equal(toBase(0.017027899998999996, "ETH"), "17027900000000000");
+  assert.equal(toBase(0.0000001, "ETH"), "100000000000");
+  assert.equal(toBase(440, "USD"), "440000000");
+  for (const bad of [0, -1, NaN, Infinity, "1", null]) assert.equal(toBase(bad, "ETH"), null, String(bad));
+});
+
+test("opensea card: ETH or dollar floors, owners, week volume; no listings or unknown currency is no card", () => {
+  const entry = { symbol: "cryptopunks", name: "CryptoPunks" };
+  assert.deepEqual(projectOpenSea(entry, "ethereum", { name: "CryptoPunks", image_url: "https://i2c.seadn.io/p.png" }, osStats(30.25, "ETH")), {
+    symbol: "cryptopunks", name: "CryptoPunks", image: "https://i2c.seadn.io/p.png", chain: "ethereum",
+    floor: "30250000000000000000", floorUnit: "ETH", listed: null, owners: 3826, volume7d: "12500000000000000000", volumeUnit: "ETH",
+  });
+  // Floor in a stablecoin, volume still in ETH: each amount keeps its own unit.
+  const rf = projectOpenSea({ symbol: "rare-friends-genesis", name: "Rare Friends Genesis" }, "robinhood", null, osStats(440, "USDG"))!;
+  assert.deepEqual([rf.chain, rf.floor, rf.floorUnit, rf.volumeUnit, rf.name], ["robinhood", "440000000", "USD", "ETH", "Rare Friends Genesis"]);
+  assert.equal(projectOpenSea(entry, "ethereum", null, osStats(1, "WETH"))!.floorUnit, "ETH");
+  assert.equal(projectOpenSea(entry, "ethereum", null, osStats(1, "ETH", 0))!.volume7d, "0");
+  assert.equal(projectOpenSea(entry, "ethereum", null, osStats(1, "ETH", null))!.volume7d, null);
+  assert.equal(projectOpenSea(entry, "ethereum", { image_url: "http://insecure.test/x.png" }, osStats(1, "ETH"))!.image, undefined);
+  assert.equal(projectOpenSea(entry, "robinhood", null, osStats(0, "")), null, "no listings");
+  assert.equal(projectOpenSea(entry, "robinhood", null, osStats(3, "HOOD")), null, "unknown currency");
+  assert.equal(projectOpenSea(entry, "ethereum", null, { errors: ["rate limited"] }), null);
+});
+
+test("opensea feeds: fixed slugs, only accept and the key go upstream, cached 5 minutes, 503 without a key", async () => {
+  const f = stub((url) => (url.endsWith("/stats") ? Response.json(osStats(2, "ETH")) : Response.json({ name: "From meta", image_url: "https://i2c.seadn.io/x.png" })));
+  try {
+    const relay = createRelay({ APP_ORIGIN: "https://app.test", OPENSEA_API_KEY: "test-key" });
+    const client = { headers: { cookie: "a=b", "x-forwarded-for": "1.2.3.4", "x-api-key": "client-key", "user-agent": "phone" } };
+    for (const chain of ["ethereum", "robinhood"] as const) {
+      const before = f.calls.length;
+      const res = await relay(new Request(`https://relay.test/feeds/nfts/${chain}?slug=evil&limit=999`, client));
+      assert.equal(res.status, 200);
+      const items = (await res.json()).items as { chain: string; symbol: string; name: string }[];
+      assert.deepEqual(items.map((c) => c.symbol), OPENSEA_NFTS[chain].map((e) => e.symbol));
+      assert.ok(items.every((c) => c.chain === chain && c.name === "From meta"));
+      const mine = f.calls.slice(before);
+      assert.equal(mine.length, 16, "stats and metadata for each of 8 collections");
+      for (const c of mine) {
+        assert.match(c.url, /^https:\/\/api\.opensea\.io\/api\/v2\/collections\/[a-z0-9-]+(\/stats)?$/);
+        assert.deepEqual([...c.headers.keys()].sort(), ["accept", "x-api-key"]);
+        assert.equal(c.headers.get("x-api-key"), "test-key");
+      }
+      const n = f.calls.length;
+      await relay(new Request(`https://relay.test/feeds/nfts/${chain}`));
+      assert.equal(f.calls.length, n, "second read comes from the cache");
+    }
+    const none = createRelay({ APP_ORIGIN: "https://app.test" });
+    const res = await none(new Request("https://relay.test/feeds/nfts/ethereum"));
+    assert.equal(res.status, 503);
+    assert.deepEqual(await res.json(), { error: "not configured" });
   } finally {
     f.restore();
   }

@@ -1,9 +1,10 @@
-// Discover feeds for the home carousel. Tokens and stocks come from
-// Jupiter's token data (as the Discover tab); prediction markets and NFT
-// collections come from the relay's read-only feeds (relay/src/feeds.ts).
+// Discover feeds for the Discover tab's carousel. Tokens and stocks come from
+// Jupiter's token data; prediction markets and NFT collections (Solana via
+// Magic Eden, Ethereum and Robinhood Chain via OpenSea) come from the relay's
+// read-only feeds (relay/src/feeds.ts).
 // All of it goes through the relay.
 
-import { RELAY } from "./config.ts";
+import { ETH_MINT, RELAY, SOL_MINT } from "./config.ts";
 import { isStock, tokens, type JupToken } from "./jupiter.ts";
 
 export type Category = "memes" | "new" | "stocks" | "markets" | "nfts";
@@ -18,7 +19,45 @@ export const CATEGORIES: { key: Category; label: string }[] = [
 
 // Shapes of the relay's feeds (mirrored, not imported: app/ builds on its own).
 export type MarketEvent = { id: string; title: string; image?: string; volume24h: number; endDate?: string; outcomes: { name: string; p: number }[] };
-export type NftCollection = { symbol: string; name: string; image?: string; floor: string | null; listed: number | null; volume7d: string | null };
+export type NftChain = "solana" | "ethereum" | "robinhood";
+export type NftUnit = "SOL" | "ETH" | "USD";
+/** Amounts are base-unit strings of their unit. An older relay sends Solana only, without chain or units. */
+export type NftCollection = {
+  symbol: string;
+  name: string;
+  image?: string;
+  chain?: NftChain;
+  floor: string | null;
+  floorUnit?: NftUnit;
+  listed: number | null;
+  owners?: number | null;
+  volume7d: string | null;
+  volumeUnit?: NftUnit;
+};
+
+export const CHAIN_LABEL: Record<NftChain, string> = { solana: "Solana", ethereum: "Ethereum", robinhood: "Robinhood Chain" };
+/** For the carousel's narrow cards. */
+export const CHAIN_SHORT: Record<NftChain, string> = { solana: "Solana", ethereum: "Ethereum", robinhood: "Robinhood" };
+export const nftChain = (n: NftCollection): NftChain => n.chain ?? "solana";
+/** The card and route id: a slug is only unique within its chain. */
+export const nftId = (n: NftCollection) => `${nftChain(n)}:${n.symbol}`;
+export const nftSource = (n: NftCollection) => (nftChain(n) === "solana" ? "Magic Eden" : "OpenSea");
+
+/** A feed amount in USD, or null until the price it needs is known. */
+export function nftUsd(amount: string | null, unit: NftUnit | undefined, prices: Record<string, number>): number | null {
+  if (!amount) return null;
+  const u = unit ?? "SOL";
+  if (u === "USD") return Number(amount) / 1e6;
+  const p = prices[u === "SOL" ? SOL_MINT : ETH_MINT];
+  return p === undefined ? null : (Number(amount) / (u === "SOL" ? 1e9 : 1e18)) * p;
+}
+
+/** Round-robin across the chains, so the first page shows all three. */
+export function interleave<T>(lists: T[][]): T[] {
+  const out: T[] = [];
+  for (let i = 0; lists.some((l) => i < l.length); i++) for (const l of lists) if (i < l.length) out.push(l[i]!);
+  return out;
+}
 
 async function relayFeed<T>(path: string): Promise<T[]> {
   const res = await fetch(`${RELAY}/feeds/${path}`, { credentials: "omit" });
@@ -27,9 +66,17 @@ async function relayFeed<T>(path: string): Promise<T[]> {
   return Array.isArray(body.items) ? body.items : [];
 }
 
+const NFT_FEEDS = ["nfts", "nfts/ethereum", "nfts/robinhood"];
+
 export const feeds = {
   markets: () => relayFeed<MarketEvent>("markets"),
-  nfts: () => relayFeed<NftCollection>("nfts"),
+  /** All three chains; a chain that fails is left out, and only all failing is an error. */
+  nfts: async () => {
+    const got = await Promise.allSettled(NFT_FEEDS.map((p) => relayFeed<NftCollection>(p)));
+    const ok = got.flatMap((r) => (r.status === "fulfilled" ? [r.value] : []));
+    if (!ok.length) throw (got[0] as PromiseRejectedResult).reason;
+    return interleave(ok);
+  },
 };
 
 /** One card in the carousel, whatever its kind. */
@@ -39,6 +86,7 @@ export type Card =
   | { kind: "nft"; id: string; nft: NftCollection };
 
 const MAX_CARDS = 12;
+const MAX_NFT_CARDS = 24; // 8 per chain
 
 const isMeme = (t: JupToken) => !isStock(t) && !t.tags?.includes("rwa");
 
@@ -54,7 +102,7 @@ export async function loadCards(c: Category): Promise<Card[]> {
     case "markets":
       return (await feeds.markets()).slice(0, MAX_CARDS).map((m) => ({ kind: "market", id: m.id, market: m }));
     case "nfts":
-      return (await feeds.nfts()).slice(0, MAX_CARDS).map((n) => ({ kind: "nft", id: n.symbol, nft: n }));
+      return (await feeds.nfts()).slice(0, MAX_NFT_CARDS).map((n) => ({ kind: "nft", id: nftId(n), nft: n }));
   }
 }
 

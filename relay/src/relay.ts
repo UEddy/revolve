@@ -8,7 +8,7 @@
 // once). Rate limits are global, never per client: the relay keeps no
 // state about who is asking.
 
-import { nftList, projectNft, projectPolymarket, type NftCollection, type NftEntry } from "./feeds.ts";
+import { nftList, projectNft, projectOpenSea, projectPolymarket, type NftCollection, type NftEntry } from "./feeds.ts";
 
 export type RelayEnv = {
   APP_ORIGIN?: string;
@@ -17,6 +17,8 @@ export type RelayEnv = {
   JUP_API_KEY?: string;
   /** Magic Eden collections for the NFT feed as `symbol:Name,symbol:Name` (defaults below). */
   NFT_COLLECTIONS?: string;
+  /** OpenSea API key for the Ethereum and Robinhood Chain NFT feeds; without it those feeds answer 503. */
+  OPENSEA_API_KEY?: string;
 };
 
 // Read-only Discover feeds: one fixed upstream each, never shaped by the client.
@@ -33,6 +35,32 @@ export const DEFAULT_NFTS: readonly NftEntry[] = [
   { symbol: "smb_gen3", name: "SMB Gen3" },
   { symbol: "tensorians", name: "Tensorians" },
 ];
+const OPENSEA = "https://api.opensea.io/api/v2/collections";
+/** Well-known collections by OpenSea slug, fixed here: the client never names what the relay fetches. */
+export const OPENSEA_NFTS: Record<"ethereum" | "robinhood", readonly NftEntry[]> = {
+  ethereum: [
+    { symbol: "cryptopunks", name: "CryptoPunks" },
+    { symbol: "boredapeyachtclub", name: "Bored Ape Yacht Club" },
+    { symbol: "pudgypenguins", name: "Pudgy Penguins" },
+    { symbol: "mutant-ape-yacht-club", name: "Mutant Ape Yacht Club" },
+    { symbol: "azuki", name: "Azuki" },
+    { symbol: "milady", name: "Milady Maker" },
+    { symbol: "doodles-official", name: "Doodles" },
+    { symbol: "lilpudgys", name: "Lil Pudgys" },
+  ],
+  // The most traded Robinhood Chain collections with live listings (October 2026).
+  robinhood: [
+    { symbol: "stonkbrokers-434284142", name: "StonkBrokers" },
+    { symbol: "chain-mancers", name: "Chain Mancers" },
+    { symbol: "hash-cats", name: "Hashcats" },
+    { symbol: "rhmachines", name: "RH Machines" },
+    { symbol: "cashcatss", name: "Cash Cats" },
+    { symbol: "rare-friends-genesis", name: "Rare Friends Genesis" },
+    { symbol: "robinhood-punks", name: "Robinhood Punks" },
+    { symbol: "robinhood-kitties", name: "Robinhood Kitties" },
+  ],
+};
+export type FeedName = "markets" | "nfts" | "nfts/ethereum" | "nfts/robinhood";
 const FEED_TTL = { markets: 60_000, nfts: 300_000 };
 const NFT_META_TTL = 24 * 3600_000;
 const NFT_META_RETRY = 3600_000;
@@ -228,20 +256,20 @@ export async function handleJup(req: Request, env: RelayEnv, state: RelayState):
   return new Response(bytes, { status: upstream.status, headers: { "content-type": type, "cache-control": browserCache } });
 }
 
-async function upstreamJson(url: string): Promise<unknown> {
-  const res = await fetch(url, { headers: { accept: "application/json" }, signal: AbortSignal.timeout(15_000) });
+/** GET a fixed upstream URL. The only headers sent are these: never anything from the client. */
+async function upstreamJson(url: string, headers: Record<string, string> = {}): Promise<unknown> {
+  const res = await fetch(url, { headers: { accept: "application/json", ...headers }, signal: AbortSignal.timeout(15_000) });
   if (!res.ok) throw new Error(`upstream ${res.status}`);
   return res.json();
 }
 
 /** Collection metadata (name, image): best effort, cached a day; after a failure not retried for an hour. */
-async function nftMeta(state: RelayState, symbol: string, url: string): Promise<unknown> {
-  const key = `nft:meta:${symbol}`;
+async function nftMeta(state: RelayState, key: string, url: string, headers: Record<string, string> = {}): Promise<unknown> {
   const hit = state.cache.get(key);
   if (hit) return hit.body.length ? JSON.parse(new TextDecoder().decode(hit.body)) : null;
   try {
-    const meta = (await upstreamJson(url)) as { name?: unknown; image?: unknown };
-    const keep = { name: meta?.name, image: meta?.image };
+    const meta = (await upstreamJson(url, headers)) as { name?: unknown; image?: unknown; image_url?: unknown };
+    const keep = { name: meta?.name, image: meta?.image, image_url: meta?.image_url };
     state.cache.set(key, { until: Date.now() + NFT_META_TTL, status: 200, type: "application/json", body: new TextEncoder().encode(JSON.stringify(keep)) });
     return keep;
   } catch {
@@ -270,8 +298,26 @@ async function feed(state: RelayState, key: string, ttl: number, load: () => Pro
   }
 }
 
-export function handleFeed(req: Request, env: RelayEnv, state: RelayState, which: "markets" | "nfts"): Promise<Response> | Response {
+export function handleFeed(req: Request, env: RelayEnv, state: RelayState, which: FeedName): Promise<Response> | Response {
   if (req.method !== "GET") return json(405, { error: "GET only" });
+  if (which === "nfts/ethereum" || which === "nfts/robinhood") {
+    const key = env.OPENSEA_API_KEY;
+    if (!key) return json(503, { error: "not configured" });
+    const chain = which === "nfts/ethereum" ? "ethereum" : "robinhood";
+    return feed(state, `feed:${which}`, FEED_TTL.nfts, async () => {
+      const out: NftCollection[] = [];
+      // One collection at a time: 8 stats calls per 5 minutes, far below the key's hourly limit.
+      for (const entry of OPENSEA_NFTS[chain]) {
+        const base = `${OPENSEA}/${encodeURIComponent(entry.symbol)}`;
+        const auth = { "x-api-key": key };
+        const stats = await upstreamJson(`${base}/stats`, auth).catch(() => null);
+        const card = projectOpenSea(entry, chain, await nftMeta(state, `nft:meta:${chain}:${entry.symbol}`, base, auth), stats);
+        if (card) out.push(card);
+      }
+      if (!out.length) throw new Error("no collections");
+      return out;
+    });
+  }
   if (which === "markets") return feed(state, "feed:markets", FEED_TTL.markets, async () => projectPolymarket(await upstreamJson(POLYMARKET_EVENTS)));
   return feed(state, "feed:nfts", FEED_TTL.nfts, async () => {
     const out: NftCollection[] = [];
@@ -279,7 +325,7 @@ export function handleFeed(req: Request, env: RelayEnv, state: RelayState, which
     for (const entry of nftList(env.NFT_COLLECTIONS, DEFAULT_NFTS)) {
       const base = `${MAGIC_EDEN}/${encodeURIComponent(entry.symbol)}`;
       const stats = await upstreamJson(`${base}/stats`).catch(() => null);
-      const card = projectNft(entry, await nftMeta(state, entry.symbol, base), stats);
+      const card = projectNft(entry, await nftMeta(state, `nft:meta:${entry.symbol}`, base), stats);
       if (card) out.push(card);
     }
     if (!out.length) throw new Error("no collections");
@@ -365,6 +411,8 @@ export function createRelay(env: RelayEnv, state: RelayState = newState(), prefi
         else if (route === "/img") res = await handleImg(req, state);
         else if (route === "/feeds/markets") res = await handleFeed(req, env, state, "markets");
         else if (route === "/feeds/nfts") res = await handleFeed(req, env, state, "nfts");
+        else if (route === "/feeds/nfts/ethereum") res = await handleFeed(req, env, state, "nfts/ethereum");
+        else if (route === "/feeds/nfts/robinhood") res = await handleFeed(req, env, state, "nfts/robinhood");
         else if (route === "/health") res = json(200, { ok: true });
         else res = json(404, { error: "not found" });
       } catch {
