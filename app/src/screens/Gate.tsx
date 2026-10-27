@@ -1,4 +1,6 @@
-// First run (create the passkey vault) and unlock.
+// First run (create the passkey vault) and unlock. Both use two zones: the
+// wordmark alone near the top, and the title, text and buttons anchored to
+// the lower part of the screen, with the space between absorbing the rest.
 
 import { useRef, useState } from "react";
 import { useVault } from "../state/vault.tsx";
@@ -47,32 +49,51 @@ function RestoreButton({ run }: { run: (fn: () => Promise<void>) => Promise<void
   );
 }
 
+/**
+ * The top zone and the flexible gap below it. The install banner, when shown,
+ * rides in the middle of the gap: it never covers a button and never moves
+ * the title off its line.
+ */
+function WelcomeTop() {
+  return (
+    <>
+      <div className="welcome-top">
+        <Wordmark height={44} />
+      </div>
+      <div className="welcome-gap" aria-hidden />
+      <InstallBanner inline />
+      <div className="welcome-gap" aria-hidden />
+    </>
+  );
+}
+
 export function Welcome() {
   const { create } = useVault();
   const { busy, error, run } = useAction();
   const supported = passkeysAvailable();
   return (
     <div className="welcome">
-      <Wordmark height={44} />
-      <h1>Buy anything with shielded ZEC.</h1>
-      <p className="muted" style={{ fontSize: 17, margin: 0 }}>
-        Tokens and stocks, paid from Zodl, landing in wallets nobody can trace back to you.
-      </p>
-      <ul className="points">
-        <li><Key /><span><b>No account.</b> A passkey on this phone is the only way in. No email, no password, no seed phrase.</span></li>
-        <li><Shield /><span><b>Your payment stays shielded.</b> ZEC never leaves the private pool on the way in.</span></li>
-        <li><Eye /><span><b>Every buy gets a fresh wallet.</b> Its key is sealed on this phone, so positions cannot be tied to each other or to you.</span></li>
-      </ul>
-      <div className="stack" style={{ marginTop: 28 }}>
-        {!supported && <p className="err">Open Revolve over https in Chrome on Android or Safari on iPhone to create a passkey.</p>}
-        {error && <p className="err">{error}</p>}
-        <button className="btn" disabled={!supported || busy} onClick={() => run(create)}>
-          {busy ? <Spinner /> : <Lock />} Create passkey
-        </button>
-        <RestoreButton run={run} />
-        <p className="faint center">Your keys never leave this phone. Revolve has no servers that know who you are.</p>
+      <WelcomeTop />
+      <div className="welcome-low">
+        <h1>Buy anything with shielded ZEC.</h1>
+        <p className="muted" style={{ fontSize: 17, margin: 0 }}>
+          Tokens and stocks, paid from Zodl, landing in wallets nobody can trace back to you.
+        </p>
+        <ul className="points">
+          <li><Key /><span><b>No account.</b> A passkey on this phone is the only way in. No email, no password, no seed phrase.</span></li>
+          <li><Shield /><span><b>Your payment stays shielded.</b> ZEC never leaves the private pool on the way in.</span></li>
+          <li><Eye /><span><b>Every buy gets a fresh wallet.</b> Its key is sealed on this phone, so positions cannot be tied to each other or to you.</span></li>
+        </ul>
+        <div className="stack" style={{ marginTop: 28 }}>
+          {!supported && <p className="err">Open Revolve over https in Chrome on Android or Safari on iPhone to create a passkey.</p>}
+          {error && <p className="err">{error}</p>}
+          <button className="btn" disabled={!supported || busy} onClick={() => run(create)}>
+            {busy ? <Spinner /> : <Lock />} Create passkey
+          </button>
+          <RestoreButton run={run} />
+          <p className="faint center">Your keys never leave this phone. Revolve has no servers that know who you are.</p>
+        </div>
       </div>
-      <InstallBanner inline />
     </div>
   );
 }
@@ -87,18 +108,19 @@ export function Unlock() {
   const { unlock } = useVault();
   const { busy, error, run } = useAction();
   return (
-    <div className="welcome" style={{ textAlign: "center", alignItems: "center" }}>
-      <Wordmark height={44} />
-      <h1 style={{ fontSize: 30 }}>Welcome back</h1>
-      <p className="muted" style={{ marginTop: 0 }}>Your wallets are sealed on this phone. Your passkey opens them.</p>
-      <div className="stack" style={{ width: "100%", marginTop: 28 }}>
-        {error && <p className="err">{error}</p>}
-        <button className="btn" disabled={busy} onClick={() => run(unlock)} autoFocus={finePointer()}>
-          {busy ? <Spinner /> : <Lock />} Unlock
-        </button>
-        <RestoreButton run={run} />
+    <div className="welcome">
+      <WelcomeTop />
+      <div className="welcome-low" style={{ textAlign: "center", alignItems: "center" }}>
+        <h1 style={{ fontSize: 30 }}>Welcome back</h1>
+        <p className="muted" style={{ marginTop: 0 }}>Your wallets are sealed on this phone. Your passkey opens them.</p>
+        <div className="stack" style={{ width: "100%", marginTop: 28 }}>
+          {error && <p className="err">{error}</p>}
+          <button className="btn" disabled={busy} onClick={() => run(unlock)} autoFocus={finePointer()}>
+            {busy ? <Spinner /> : <Lock />} Unlock
+          </button>
+          <RestoreButton run={run} />
+        </div>
       </div>
-      <InstallBanner inline />
     </div>
   );
 }

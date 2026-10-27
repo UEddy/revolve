@@ -288,9 +288,8 @@ h3 { font-size: 16px; margin: 0; }
   background: var(--surface); color: var(--ink); border: 1px solid var(--line); border-radius: 20px; box-shadow: var(--shadow);
   text-align: left; animation: install-in 320ms var(--ease) both;
 }
-/* Welcome and unlock: in the flow, at the bottom of the screen when there is room, else after the buttons. */
-.install.inline { align-self: stretch; margin-top: auto; }
-.welcome > .stack:has(+ .install.inline) { margin-bottom: 24px; }
+/* Welcome and unlock: in the flow, in the gap between the wordmark and the title (see .welcome). */
+.install.inline { align-self: stretch; flex: none; }
 /* Tab screens: floating above the tab bar (54px tall, 12px off the bottom). */
 .install.floating {
   position: fixed; z-index: 15; left: 50%; transform: translateX(-50%);
@@ -309,12 +308,36 @@ body:has(.sheet) .install { display: none; }
 @media (prefers-reduced-motion: reduce) { .install { animation: none; } }
 
 /* ---------- welcome ---------- */
-/* The wordmark sits in the upper third (its top about 18.5% down, under 22% even below the demo strip), the rest follows it. */
+/*
+ * Two zones in one flex column (welcome and unlock):
+ * - top: the wordmark alone, about 58% of the screen width, its centre 22% down
+ *   the screen, and never closer than 16px below the top safe area;
+ * - low: title, text and buttons. Its minimum height puts the title about 57%
+ *   down, with 32px clear of the bottom safe area. Taller content (the first-run
+ *   points, an error) grows it upward, never over the top.
+ * The gap between them is the only flexible part, so short phones lose it first.
+ * The install banner sits in the middle of the gap.
+ */
 .welcome {
+  --wm-w: min(58vw, 280px);
+  --wm-h: calc(var(--wm-w) * 134 / 552); /* the wordmark's aspect ratio */
+  --wm-at: 22dvh;
+  --gap-min: 24px;
   display: flex; flex-direction: column; min-height: 100dvh;
-  padding: calc(env(safe-area-inset-top, 0px) + clamp(40px, 18.5dvh, 220px)) 22px calc(env(safe-area-inset-bottom, 0px) + 28px);
+  padding: env(safe-area-inset-top, 0px) 22px calc(env(safe-area-inset-bottom, 0px) + 32px);
 }
-.welcome h1 { font-size: 36px; margin: 26px 0 12px; }
+.welcome-top { flex: none; display: flex; justify-content: center; padding-top: max(16px, calc(var(--wm-at) - env(safe-area-inset-top, 0px) - var(--wm-h) / 2)); }
+.welcome-top .wordmark img { width: var(--wm-w); height: auto; }
+.welcome-gap { flex: 1 1 0; min-height: var(--gap-min); }
+/* Without a banner the two halves of the gap meet: one minimum, not two. */
+.welcome-gap + .welcome-gap { min-height: 0; }
+.welcome-low { flex: none; display: flex; flex-direction: column; min-height: calc(43dvh - env(safe-area-inset-bottom, 0px) - 32px); }
+.welcome-low > .stack { width: 100%; }
+/* Short phones: after the gap, the wordmark moves up a little rather than push the buttons off screen. */
+@media (max-height: 640px) {
+  .welcome { --wm-at: 16dvh; --gap-min: 16px; }
+}
+.welcome h1 { font-size: 36px; margin: 0 0 12px; }
 .welcome .points { list-style: none; padding: 0; margin: 18px 0 0; }
 .welcome .points li { display: flex; gap: 12px; padding: 10px 0; }
 .welcome .points svg { width: 22px; height: 22px; color: var(--accent-mark); flex: none; margin-top: 1px; }
