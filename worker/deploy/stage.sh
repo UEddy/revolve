@@ -58,12 +58,16 @@ MINT_KEY_PATH=/opt/revolve/secrets/mint-key.pem
 MINT_KEY_ID=k1
 EOF
 
+# Keys added to relay.env by hand survive a re-stage (read without printing).
+OPENSEA_KEY=$(grep -m1 '^OPENSEA_API_KEY=' "$OUT/relay.env" 2>/dev/null | cut -d= -f2- || true)
+
 cat > "$OUT/relay.env" <<EOF
 APP_ORIGIN=$APP_ORIGIN
 PORT=8788
 HOST=127.0.0.1
 SOLANA_RPC_URL=$RPC
 JUP_API_KEY=
+OPENSEA_API_KEY=$OPENSEA_KEY
 EOF
 
 # Consistent copies via SQLite's backup API. The worker DB carries the settled
