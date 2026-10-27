@@ -5,17 +5,26 @@
 // this file refuses it again at runtime in case a bundle was built some
 // other way.
 
-// `env` is absent outside Vite (node tests), hence the optional chaining.
-const env = (import.meta as { env?: { VITE_ORDER_API?: string; VITE_RELAY_URL?: string; DEV?: boolean } }).env;
-const dev = env?.DEV === true;
-const raw = env?.VITE_ORDER_API?.trim() ?? "";
+// Read as static properties only: Vite replaces each one with its value, while
+// touching `import.meta.env` as a whole would inline every VITE_* variable in
+// the build environment (on Vercel that includes the VITE_VERCEL_* system
+// variables) into the bundle. Outside Vite (node tests) there is no
+// `import.meta.env`, hence the try.
+let dev = false;
+let raw = "";
+let relayUrl = "";
+try {
+  dev = import.meta.env.DEV === true;
+  raw = (import.meta.env.VITE_ORDER_API ?? "").trim();
+  relayUrl = (import.meta.env.VITE_RELAY_URL ?? "").trim();
+} catch {}
 
 const wantsMock = raw === "mock" || (!raw && dev);
 export const ORDER_API: string | "mock" | null = wantsMock ? (dev ? "mock" : null) : raw ? raw.replace(/\/$/, "") : null;
 export const MOCK = ORDER_API === "mock";
 
 /** The privacy relay: its own origin in production, the dev server's /api under `npm run dev`. */
-export const RELAY = env?.VITE_RELAY_URL?.trim().replace(/\/$/, "") || "/api";
+export const RELAY = relayUrl.replace(/\/$/, "") || "/api";
 
 
 export const SOL_MINT = "So11111111111111111111111111111111111111112";

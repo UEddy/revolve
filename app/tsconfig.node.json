@@ -12,7 +12,7 @@
     "verbatimModuleSyntax": true,
     "isolatedModules": true,
     "skipLibCheck": true,
-    "types": ["node"]
+    "types": ["node", "vite/client"]
   },
   "include": ["src/**/*.test.ts", "vite.config.ts", "build-env.ts", "build-env.test.ts", "build-dist.ts", "build-dist.test.ts"]
 }
