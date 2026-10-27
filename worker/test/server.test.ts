@@ -19,6 +19,7 @@ async function withApi(
     quote: over.quote ?? ((zat) => zat * 100n), // 0.002 -> 20M, 0.005 -> 50M, 0.01 -> 100M lamports
     usdPerZec: () => (over.usd === undefined ? "1224.50" : over.usd),
     freeInventory: () => free,
+    mint: null,
   });
   await new Promise<void>((r) => server.listen(0, "127.0.0.1", r));
   try {

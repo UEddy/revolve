@@ -13,10 +13,11 @@ Layout on the droplet, all owned by the `revolve` system user:
 /opt/revolve/worker/                  worker checkout + .env (600) + data/ (700)
 /opt/revolve/relay/                   relay checkout + .env (600)
 /opt/revolve/secrets/hotwallet.json   Solana hot wallet (600, dir 700)
+/opt/revolve/secrets/mint-key.pem     credits mint key, generated on the droplet (600)
 ```
 
 The watcher has no unit of its own: the worker starts it as a child process.
-Public routes: `/orders`, `/orders/<id>`, `/limits`, `/buckets` go to the worker; `/relay/*`
+Public routes: `/orders`, `/orders/<id>`, `/limits`, `/buckets`, `/mint/*` go to the worker; `/relay/*`
 goes to the relay with the prefix stripped; everything else returns 404. Build the
 app with `VITE_ORDER_API=https://revolveapp.duckdns.org` and
 `VITE_RELAY_URL=https://revolveapp.duckdns.org/relay`.
@@ -97,6 +98,18 @@ cd /opt/revolve/solver && sudo -u revolve ./revolve-watcher address
 grep -o '^DEPOSIT_UA=.\{20\}' /opt/revolve/worker/.env   # must start the same as the address above
 ```
 
+## D5b [droplet] Credits mint key
+
+Generated on the droplet as `revolve`, so it never leaves the server. The script
+refuses to overwrite an existing key and prints only the public key fingerprint.
+Replacing the key later invalidates every unspent credit, so do this once.
+
+```bash
+cd /opt/revolve/worker && sudo -u revolve node src/mint-keygen.ts /opt/revolve/secrets/mint-key.pem
+ls -l /opt/revolve/secrets/mint-key.pem                   # -rw------- revolve revolve
+grep -E '^MINT_KEY_(PATH|ID)=' /opt/revolve/worker/.env  # both set (stage.sh writes them)
+```
+
 ## D6 [droplet] Start the services
 
 ```bash
@@ -124,6 +137,7 @@ journalctl -u caddy --since "2 min ago" | grep -iE 'certificate obtained|error' 
 ```bash
 B=https://revolveapp.duckdns.org; O=https://<APP_ORIGIN>
 curl -s $B/limits; echo                                                    # min/max/step/indicative USD
+curl -s $B/mint/key; echo                                                  # key_id k1, public key, 0.001
 curl -s $B/buckets; echo                                                   # bucket list (deprecated)
 curl -s $B/relay/health; echo                                              # {"ok":true}
 curl -s -o /dev/null -w '%{http_code}\n' $B/                               # 404

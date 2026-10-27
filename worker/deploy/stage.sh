@@ -54,6 +54,8 @@ SPREAD_BPS=150
 SWAP_FEE_LAMPORTS=5000000
 QUOTE_TTL_SECS=900
 MAX_OPEN_ORDERS=20
+MINT_KEY_PATH=/opt/revolve/secrets/mint-key.pem
+MINT_KEY_ID=k1
 EOF
 
 cat > "$OUT/relay.env" <<EOF

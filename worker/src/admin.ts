@@ -33,6 +33,12 @@ function list() {
   for (const o of orders) {
     console.log(`  ${o.order_id}  ${zatToZec(BigInt(o.bucket_zat))} ZEC  ${o.review_reason}  note=${o.note_key}  burner=${o.burner}`);
   }
+  // Fundings carry no burner: they are refunded offline, never minted from here.
+  const funds = book.funds.reviewFunds();
+  console.log(`fundings in needs_review (${funds.length}):`);
+  for (const f of funds) {
+    console.log(`  ${f.fund_id}  ${zatToZec(BigInt(f.amount_zat))} ZEC  ${f.review_reason}  note=${f.note_key}`);
+  }
 }
 
 async function payOut(args: string[]) {
