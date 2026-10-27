@@ -44,7 +44,8 @@ export function positionRisk(p: Position, all: Position[]): Risk {
   if (twin) reasons.push({ points: 15, text: "Another of your wallets bought the same asset within the hour." });
   const shared = sharedDestinations(all);
   for (const s of p.sends) {
-    if (shared.has(s.to)) reasons.push({ points: 40, text: `Sent to ${short(s.to)}, which another of your wallets also sent to. Anyone can join them.` });
+    if (s.cashout && !shared.has(s.to)) reasons.push({ points: 10, text: "Cashed out to Zcash through Zodl's swap: the deposit, its amount and time are public on the swap's chain; the ZEC itself lands shielded." });
+    else if (shared.has(s.to)) reasons.push({ points: 40, text: `Sent to ${short(s.to)}, which another of your wallets also sent to. Anyone can join them.` });
     else reasons.push({ points: 15, text: `Sent to ${short(s.to)}: that address is now tied to this purchase.` });
   }
   if (p.keyRevealed) reasons.push({ points: 15, text: "Its key was shown for export. Importing it next to your other wallets links them." });
@@ -136,6 +137,48 @@ export function sendWarnings(from: Position, to: string, all: Position[]): Warni
     w.push({ level: "high", title: "You sent to this address before", body: `Another of your wallets already sent here. Sending again links ${prior.length + 1} of your positions together.` });
   }
   w.push({ level: "medium", title: "This address becomes tied to the purchase", body: "Never send to an exchange account or a wallet people know is yours. That would undo the privacy of this position." });
+  return w;
+}
+
+const CASHOUT_SOON_MS = 60 * MIN;
+/** A cash-out this big, all at once, is rare enough on the swap's public records to stand out. */
+const LARGE_USD = 250;
+const LARGE_LAMPORTS_NO_PRICE = 2_000_000_000n;
+
+/**
+ * Before "Cash out to Zcash". Zodl's swap provider publishes each swap on its
+ * own chain: the deposit from this wallet, the amount, and the time. The ZEC
+ * lands shielded, but timing and amount can still pair the two ends: a
+ * cash-out right after the buy, or one that moves a whole large position at
+ * once, is easy to match.
+ */
+export function cashOutWarnings(p: Position, to: string, amountLamports: bigint, maxLamports: bigint, all: Position[], now: number, solUsd?: number): Warning[] {
+  const w: Warning[] = [];
+  if (all.some((o) => o.burner.pub === to)) {
+    w.push({ level: "high", title: "That is another of your wallets", body: "Cash out goes to the deposit address Zodl shows, never to one of your own wallets." });
+  }
+  if (all.some((o) => o.sends.some((s) => s.to === to))) {
+    w.push({ level: "high", title: "You sent to this address before", body: "Zodl shows a new deposit address for every swap. Reusing an old one links your positions, and the swap may not arrive. Start a new swap in Zodl." });
+  }
+  const bought = p.swap?.at ?? p.createdAt;
+  if (now - bought < CASHOUT_SOON_MS) {
+    const m = Math.max(1, Math.round((now - bought) / MIN));
+    w.push({
+      level: "medium",
+      title: `You bought this ${m} minute${m === 1 ? "" : "s"} ago`,
+      body: "The swap is public on its own chain, with its time. Cashing out right after buying lets the two be paired by timing. Waiting a while helps.",
+    });
+  }
+  const whole = maxLamports > 0n && amountLamports * 10n >= maxLamports * 9n;
+  const usd = solUsd === undefined ? null : (Number(amountLamports) / 1e9) * solUsd;
+  const large = usd === null ? amountLamports >= LARGE_LAMPORTS_NO_PRICE : usd >= LARGE_USD;
+  if (whole && large) {
+    w.push({
+      level: "medium",
+      title: "This cashes out the whole position at once",
+      body: "A large amount moved in one go is easy to match to the ZEC that arrives in your wallet. A few smaller cash-outs, spread over time, blend in better.",
+    });
+  }
   return w;
 }
 

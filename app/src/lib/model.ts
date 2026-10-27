@@ -50,8 +50,11 @@ export type Position = {
   stage: Stage;
   swap?: { sig?: string; inLamports?: string; outAmount?: string; at?: number; error?: string; attempts: number };
   balance?: { lamports: string; tokenRaw: string; at: number };
-  sends: { to: string; at: number; sig: string; what: "asset" | "cash" }[];
+  /** `cashout`: SOL sent to a deposit address from Zodl's Swap, to come back as shielded ZEC. */
+  sends: { to: string; at: number; sig: string; what: "asset" | "cash"; cashout?: true }[];
   keyRevealed?: boolean;
+  /** A half-filled "Cash out to Zcash" form, kept in the vault so switching to Zodl (and a lock meanwhile) loses nothing. */
+  cashoutDraft?: { to: string; amount: string };
   /** Created against the mock order service: no money moved, balances are simulated. */
   demo?: boolean;
   /** "credits": paid from the credit balance (CREDITS_CONTRACT.md); otherwise a per-buy Zodl payment. */
