@@ -4,8 +4,8 @@
 
 import { useEffect, useState } from "react";
 import { cardCache } from "../components/DiscoverSection.tsx";
-import { feeds, type MarketEvent, type NftCollection } from "../lib/discover.ts";
-import { SOL_MINT } from "../lib/config.ts";
+import { CHAIN_LABEL, feeds, nftChain, nftId, nftSource, nftUsd, type MarketEvent, type NftCollection } from "../lib/discover.ts";
+import { ETH_MINT, SOL_MINT } from "../lib/config.ts";
 import { compact, usd } from "../lib/format.ts";
 import { useEngine } from "../state/engine.tsx";
 import { TokenIcon, TopBar } from "../components/bits.tsx";
@@ -81,15 +81,22 @@ export function MarketScreen({ id }: { id: string }) {
   );
 }
 
-export function NftScreen({ symbol }: { symbol: string }) {
+/** `id` is `chain:slug`; a bare slug (links from before Ethereum and Robinhood Chain) is Solana. */
+export function NftScreen({ symbol: id }: { symbol: string }) {
+  const key = id.includes(":") ? id : `solana:${id}`;
   const { prices, priceOf } = useEngine();
-  useEffect(() => priceOf(SOL_MINT), [priceOf]);
+  useEffect(() => {
+    priceOf(SOL_MINT);
+    priceOf(ETH_MINT);
+  }, [priceOf]);
   const { item: n, error } = useItem<NftCollection>(
-    () => cardCache.get("nfts")?.cards.flatMap((c) => (c.kind === "nft" && c.id === symbol ? [c.nft] : []))[0],
-    async () => (await feeds.nfts()).find((x) => x.symbol === symbol),
+    () => cardCache.get("nfts")?.cards.flatMap((c) => (c.kind === "nft" && c.id === key ? [c.nft] : []))[0],
+    async () => (await feeds.nfts()).find((x) => nftId(x) === key),
   );
-  const sol = prices[SOL_MINT];
-  const asUsd = (lamports: string | null) => (lamports && sol !== undefined ? usd((Number(lamports) / 1e9) * sol) : "–");
+  const asUsd = (amount: string | null, unit: NftCollection["floorUnit"]) => {
+    const v = nftUsd(amount, unit, prices);
+    return v === null ? "–" : usd(v);
+  };
   if (!n) return <div className="screen"><TopBar title="" />{error ? <p className="empty">{error}</p> : <div className="skeleton" style={{ borderRadius: 22 }} />}</div>;
   return (
     <div className="screen">
@@ -97,20 +104,24 @@ export function NftScreen({ symbol }: { symbol: string }) {
       <div className="row">
         <TokenIcon src={n.image} symbol={n.name} large />
         <div className="grow">
-          <div className="eyebrow">NFT collection</div>
+          <div className="eyebrow">NFT collection · {CHAIN_LABEL[nftChain(n)]}</div>
           <h1 style={{ margin: "4px 0 0", fontSize: 24 }}>{n.name}</h1>
         </div>
       </div>
       <div className="hero" style={{ textAlign: "left", padding: "18px 0 6px" }}>
-        <div className="total num">{asUsd(n.floor)}</div>
+        <div className="total num">{asUsd(n.floor, n.floorUnit)}</div>
         <div className="muted">Floor price</div>
       </div>
       <ComingSoon what="NFT collections" />
       <div className="stats">
-        <div className="stat"><span className="faint">Listed</span><b className="num">{n.listed === null ? "–" : compact(n.listed)}</b></div>
-        <div className="stat"><span className="faint">Traded in 7 days</span><b className="num">{asUsd(n.volume7d)}</b></div>
+        {n.listed !== null || n.owners == null ? (
+          <div className="stat"><span className="faint">Listed</span><b className="num">{n.listed === null ? "–" : compact(n.listed)}</b></div>
+        ) : (
+          <div className="stat"><span className="faint">Owners</span><b className="num">{compact(n.owners)}</b></div>
+        )}
+        <div className="stat"><span className="faint">Traded in 7 days</span><b className="num">{asUsd(n.volume7d, n.volumeUnit)}</b></div>
       </div>
-      <p className="faint" style={{ marginTop: 14 }}>Prices from Magic Eden.</p>
+      <p className="faint" style={{ marginTop: 14 }}>Prices from {nftSource(n)}.</p>
     </div>
   );
 }

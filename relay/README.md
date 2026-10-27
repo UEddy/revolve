@@ -11,9 +11,10 @@ No dependencies beyond Node 24. No request logging: no IPs, paths, user agents o
 | `GET /img?u=https://...` | Token icons. https only, no IP literals or local names, images only, 1 MB cap, served under a sandbox CSP. |
 | `GET /feeds/markets` | Top open Polymarket events by 24h volume (Gamma API, read only), cut down to title, image, 24h volume, end date and up to 6 open outcomes with their chances. Cached 60 s. |
 | `GET /feeds/nfts` | Floor price, listings and 7-day volume for a fixed list of Solana NFT collections (Magic Eden public API, no key). Cached 5 minutes. |
+| `GET /feeds/nfts/ethereum`, `GET /feeds/nfts/robinhood` | The same for fixed lists of 8 Ethereum and 8 Robinhood Chain collections (`OPENSEA_NFTS` in `src/relay.ts`), from OpenSea API v2 `/collections/:slug/stats` and `/collections/:slug`. Owners instead of listings. Each amount carries its unit (`floorUnit`, `volumeUnit`: ETH in wei or USD in micro-dollars, since some floors are quoted in stablecoins). Cached 5 minutes; 503 `not configured` without `OPENSEA_API_KEY`. |
 | `GET /health` | `{"ok":true}` |
 
-The two feeds take no input from the client: each is one fixed upstream URL. If an upstream fails or rate-limits, the last good copy is served (header `x-revolve-stale: 1`).
+The feeds take no input from the client: every upstream URL is fixed, and the only headers sent are `accept` (plus `x-api-key` to OpenSea). If an upstream fails or rate-limits, the last good copy is served (header `x-revolve-stale: 1`).
 
 NFT collections: Magic Eden's ranked "popular collections" endpoint returns nothing and its plain collection list is newest-first and unvetted, so the feed uses a fixed list of well-known collections (`DEFAULT_NFTS` in `src/relay.ts`), overridable with `NFT_COLLECTIONS=symbol:Name,symbol:Name`. Magic Eden's per-collection metadata endpoint (name, image) is far more tightly rate-limited than `/stats`; it is tried once a day per collection and its failure just means no image. Tensor's API would need a key (`x-tensor-api-key`), so it isn't used.
 
@@ -30,3 +31,5 @@ npm test
 On the droplet: `deploy/revolve-relay.service` (systemd, memory capped) behind TLS, e.g. `deploy/Caddyfile.example`. Keep the reverse proxy's access logs off.
 
 The app's dev server (`npm run dev` in `app/`) mounts this same code at `/api`, so local development needs no second process.
+
+OpenSea needs `OPENSEA_API_KEY` (a free full key from opensea.io → Settings → Developer; the 7-day "instant" keys don't suit a server). A refresh is 8 stats calls per chain every 5 minutes, about 200 calls an hour, plus metadata once a day; well under the free key's limit. The key is only ever sent to api.opensea.io.

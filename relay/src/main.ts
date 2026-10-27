@@ -22,6 +22,7 @@ const server = createServer(
       JUP_API_BASE: process.env.JUP_API_BASE,
       JUP_API_KEY: process.env.JUP_API_KEY,
       NFT_COLLECTIONS: process.env.NFT_COLLECTIONS,
+      OPENSEA_API_KEY: process.env.OPENSEA_API_KEY,
     }),
   ),
 );
