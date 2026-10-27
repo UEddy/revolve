@@ -2,7 +2,7 @@ import { loadConfig } from "./config.ts";
 import { openDb } from "./db.ts";
 import { startMint } from "./mint.ts";
 import { OrderBook } from "./orders.ts";
-import { Payer, runPayouts } from "./payout.ts";
+import { Payer, freeInventory, runPayouts } from "./payout.ts";
 import { Pricing } from "./pricing.ts";
 import { createApi } from "./server.ts";
 import { runWatcher } from "./watcher.ts";
@@ -26,7 +26,7 @@ async function tick() {
   paying = true;
   try {
     await payer.refreshBalance();
-    await runPayouts(book, payer, cfg.solReserveLamports);
+    await runPayouts(book, payer, { reserve: cfg.solReserveLamports, dailyCap: cfg.dailyPayoutCapLamports });
   } catch (e) {
     console.error(`payout tick failed: ${(e as Error).message}`);
   } finally {
@@ -52,6 +52,6 @@ createApi({
   mint,
   freeInventory: () => {
     const balance = payer.cachedBalance();
-    return balance === null ? null : balance - cfg.solReserveLamports - book.committedLamports();
+    return balance === null ? null : freeInventory(balance, book, cfg);
   },
 }).listen(cfg.port, "127.0.0.1", () => console.error(`order API on 127.0.0.1:${cfg.port}`));

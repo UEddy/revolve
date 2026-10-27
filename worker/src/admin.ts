@@ -82,7 +82,7 @@ async function payOut(args: string[]) {
 
   const orderId = book.bindReviewNote(noteKey, burner, target);
   const payer = new Payer(cfg.solanaRpcUrl, cfg.solanaKeypairPath);
-  await runPayouts(book, payer, cfg.solReserveLamports, orderId);
+  await runPayouts(book, payer, { reserve: cfg.solReserveLamports, dailyCap: cfg.dailyPayoutCapLamports }, orderId);
 
   const status = book.get(orderId);
   if (status === null) {

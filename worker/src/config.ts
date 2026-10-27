@@ -10,6 +10,10 @@ export interface Config {
   solanaRpcUrl: string;
   solanaKeypairPath: string;
   solReserveLamports: bigint;
+  /** The most of the hot wallet's balance ever offered as inventory, however much it holds. */
+  hotWalletCapLamports: bigint;
+  /** The most paid out per UTC day, in flight included: bounds the loss from a forged order or a stolen mint key. */
+  dailyPayoutCapLamports: bigint;
   lamportsPerZec: bigint | null;
   spreadBps: number;
   swapFeeLamports: bigint;
@@ -35,6 +39,8 @@ export function loadConfig(): Config {
     solanaRpcUrl: opt("SOLANA_RPC_URL", "https://api.mainnet-beta.solana.com"),
     solanaKeypairPath: req("SOLANA_KEYPAIR_PATH"),
     solReserveLamports: BigInt(opt("SOL_RESERVE_LAMPORTS", "10000000")),
+    hotWalletCapLamports: BigInt(opt("HOT_WALLET_CAP_LAMPORTS", "1000000000")),
+    dailyPayoutCapLamports: BigInt(opt("DAILY_PAYOUT_CAP_LAMPORTS", "1000000000")),
     lamportsPerZec: fixedRate === "" ? null : BigInt(fixedRate),
     spreadBps: Number(opt("SPREAD_BPS", "150")),
     swapFeeLamports: BigInt(opt("SWAP_FEE_LAMPORTS", "5000000")),

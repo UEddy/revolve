@@ -1,4 +1,4 @@
-import { mkdirSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync } from "node:fs";
 import { dirname } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 
@@ -49,9 +49,11 @@ CREATE TABLE IF NOT EXISTS spent_tokens (token_hash TEXT PRIMARY KEY);
 `;
 
 export function openDb(path: string): DatabaseSync {
-  if (path !== ":memory:") mkdirSync(dirname(path), { recursive: true });
+  if (path !== ":memory:") mkdirSync(dirname(path), { recursive: true, mode: 0o700 });
   const db = new DatabaseSync(path);
   db.exec("PRAGMA journal_mode = WAL;");
+  // Owner only, whatever the umask: the database and its WAL files hold note hashes and open orders.
+  if (path !== ":memory:") for (const f of [path, `${path}-wal`, `${path}-shm`]) if (existsSync(f)) chmodSync(f, 0o600);
   // The worker and the admin CLI share this file; wait for each other's writes.
   db.exec("PRAGMA busy_timeout = 5000;");
   db.exec(SCHEMA);

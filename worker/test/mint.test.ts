@@ -7,7 +7,7 @@ import { RSABSSA } from "@cloudflare/blindrsa-ts";
 import { openDb } from "../src/db.ts";
 import { Mint, b64 } from "../src/mint.ts";
 import { OrderBook, type NoteLine } from "../src/orders.ts";
-import { createApi } from "../src/server.ts";
+import { Bucket, createApi } from "../src/server.ts";
 
 // The client side (prepare, blind, finalize) is the library, as in the app.
 const suite = RSABSSA.SHA384.PSS.Randomized();
@@ -80,6 +80,8 @@ async function withMintApi(
     usdPerZec: () => "1224.50",
     freeInventory: () => state.free,
     mint: opts.mint === undefined ? mint : opts.mint,
+    // Rate limits have their own test (hardening.test.ts); these tests make bursts of calls.
+    limits: { write: new Bucket(1e9, 1e9), read: new Bucket(1e9, 1e9) },
   });
   await new Promise<void>((r) => server.listen(0, "127.0.0.1", r));
   const spent = () => (db.prepare("SELECT COUNT(*) AS n FROM spent_tokens").get() as { n: number }).n;

@@ -41,10 +41,33 @@ export class Payer {
  * signature before broadcast, so a crash or timeout is resolved by looking the
  * signature up, never by sending a second transfer.
  */
-export async function runPayouts(book: OrderBook, payer: Payer, reserve: bigint, onlyOrderId?: string): Promise<void> {
+export type PayoutLimits = { reserve: bigint; dailyCap: bigint };
+
+/**
+ * What can still be promised to new orders: the hot wallet balance, but never
+ * more than its cap, less the reserve; and never more than today's payout cap
+ * allows; less everything already promised to open orders.
+ */
+export function freeInventory(
+  balance: bigint,
+  book: Pick<OrderBook, "committedLamports" | "paidToday">,
+  cfg: { solReserveLamports: bigint; hotWalletCapLamports: bigint; dailyPayoutCapLamports: bigint },
+): bigint {
+  const wallet = (balance < cfg.hotWalletCapLamports ? balance : cfg.hotWalletCapLamports) - cfg.solReserveLamports;
+  const today = cfg.dailyPayoutCapLamports - book.paidToday();
+  // Committed covers open orders and payouts in flight alike.
+  return (wallet < today ? wallet : today) - book.committedLamports();
+}
+
+export async function runPayouts(book: OrderBook, payer: Payer, limits: PayoutLimits, onlyOrderId?: string): Promise<void> {
+  const { reserve, dailyCap } = limits;
   await reconcile(book, payer);
   for (const due of book.due()) {
     if (onlyOrderId !== undefined && due.orderId !== onlyOrderId) continue;
+    if (book.paidOrPayingToday() + due.lamports > dailyCap) {
+      console.error("payout waiting: daily payout cap reached");
+      return;
+    }
     const balance = await payer.refreshBalance();
     if (balance < due.lamports + reserve) {
       console.error("payout waiting: hot wallet below payout plus reserve");

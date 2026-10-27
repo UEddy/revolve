@@ -3,7 +3,7 @@ import type { AddressInfo } from "node:net";
 import { test } from "node:test";
 import { openDb } from "../src/db.ts";
 import { OrderBook } from "../src/orders.ts";
-import { createApi } from "../src/server.ts";
+import { Bucket, createApi } from "../src/server.ts";
 
 async function withApi(
   free: bigint | null,
@@ -20,6 +20,7 @@ async function withApi(
     usdPerZec: () => (over.usd === undefined ? "1224.50" : over.usd),
     freeInventory: () => free,
     mint: null,
+    limits: { write: new Bucket(1e9, 1e9), read: new Bucket(1e9, 1e9) },
   });
   await new Promise<void>((r) => server.listen(0, "127.0.0.1", r));
   try {
