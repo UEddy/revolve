@@ -1,6 +1,6 @@
 import { loadConfig } from "./config.ts";
 import { openDb } from "./db.ts";
-import { Mint } from "./mint.ts";
+import { startMint } from "./mint.ts";
 import { OrderBook } from "./orders.ts";
 import { Payer, runPayouts } from "./payout.ts";
 import { Pricing } from "./pricing.ts";
@@ -17,8 +17,7 @@ const book = new OrderBook(openDb(cfg.dbPath));
 const payer = new Payer(cfg.solanaRpcUrl, cfg.solanaKeypairPath);
 const pricing = new Pricing(cfg);
 pricing.start();
-const mint = cfg.mintKeyPath ? await Mint.load(cfg.mintKeyPath, cfg.mintKeyId) : null;
-console.error(mint ? `mint key ${mint.keyId} loaded (${mint.kLen * 8} bits)` : "mint disabled: MINT_KEY_PATH not set");
+const mint = await startMint(cfg.mintKeyPath, cfg.mintKeyId);
 
 let paying = false;
 async function tick() {

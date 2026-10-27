@@ -1,11 +1,13 @@
-// Generates the credits mint key (RSA, PKCS#8 PEM) straight to a file outside the
-// repo, mode 600, never overwriting one. Prints only the public key's fingerprint.
+// Generates the credits mint key (RSA, PKCS#8 PEM) straight to a file outside any
+// git work tree and outside worker/, relay/, app/ and solver/ (see keypath.ts),
+// mode 600, never overwriting one. Prints only the public key's fingerprint.
 //
 //   node src/mint-keygen.ts <out.pem> [--bits 2048]
 
 import { createHash, createPublicKey, generateKeyPairSync } from "node:crypto";
 import { existsSync, realpathSync, writeFileSync } from "node:fs";
-import { dirname, resolve, sep } from "node:path";
+import { dirname, resolve } from "node:path";
+import { secretPathProblem } from "./keypath.ts";
 
 const [out, flag, value] = process.argv.slice(2);
 if (!out || (flag !== undefined && flag !== "--bits")) fail("usage: mint-keygen.ts <out.pem> [--bits 2048]");
@@ -14,9 +16,9 @@ if (!Number.isInteger(bits) || bits < 2048 || bits % 1024 !== 0) fail("--bits mu
 
 const path = resolve(out);
 if (!existsSync(dirname(path))) fail(`directory ${dirname(path)} does not exist`);
-const repo = realpathSync(resolve(import.meta.dirname, "../.."));
 const target = resolve(realpathSync(dirname(path)), path.slice(dirname(path).length + 1));
-if (target === repo || target.startsWith(repo + sep)) fail("the mint key must live outside the repo");
+const problem = secretPathProblem(target);
+if (problem) fail(`refusing: ${problem}`);
 if (existsSync(target)) fail(`${target} exists; refusing to overwrite a mint key`);
 
 const { privateKey } = generateKeyPairSync("rsa", { modulusLength: bits, publicExponent: 65537 });
