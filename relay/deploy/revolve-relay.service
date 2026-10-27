@@ -20,7 +20,28 @@ ProtectSystem=strict
 ProtectHome=yes
 PrivateTmp=yes
 PrivateDevices=yes
-RestrictAddressFamilies=AF_INET AF_INET6
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+# Writes nothing to disk: no ReadWritePaths at all.
+# No privileges at all: no capabilities, no new ones, no kernel or device
+# access, files created private to the service. (MemoryDenyWriteExecute is
+# left out on purpose: Node's JIT needs writable executable memory.)
+CapabilityBoundingSet=
+AmbientCapabilities=
+UMask=0077
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectKernelLogs=yes
+ProtectControlGroups=yes
+ProtectClock=yes
+ProtectHostname=yes
+ProtectProc=invisible
+RestrictNamespaces=yes
+RestrictRealtime=yes
+RestrictSUIDSGID=yes
+LockPersonality=yes
+SystemCallArchitectures=native
+SystemCallFilter=@system-service
+SystemCallFilter=~@privileged @mount @debug @cpu-emulation @obsolete @raw-io @reboot @swap
 
 [Install]
 WantedBy=multi-user.target
