@@ -16,6 +16,7 @@ import { Check } from "../components/icons.tsx";
 import { PayCard } from "../components/PayCard.tsx";
 import { href, go } from "../router.ts";
 import { SendSheet } from "./Send.tsx";
+import { CashOutSheet } from "./CashOut.tsx";
 
 type Step = { key: string; label: string; detail?: string };
 
@@ -75,6 +76,7 @@ export function PositionScreen({ id }: { id: string }) {
   const { prices, busy, retrySwap, sell, priceOf } = useEngine();
   const [sending, setSending] = useState(false);
   const [selling, setSelling] = useState(false);
+  const [cashingOut, setCashingOut] = useState(false);
   const [showKey, setShowKey] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const all = data?.positions ?? [];
@@ -128,10 +130,18 @@ export function PositionScreen({ id }: { id: string }) {
           {p.stage === "held" && (
             <div className="stack">
               <button className="btn" disabled={!!doing} onClick={() => setSelling(true)}>{doing === "Selling" ? <Spinner /> : null} Sell to cash</button>
+              <button className="btn ghost" disabled={!!doing} onClick={() => setCashingOut(true)}>Cash out to Zcash</button>
               <button className="btn ghost" onClick={() => setSending(true)}>Send out</button>
             </div>
           )}
-          {p.stage === "closed" && <p className="muted center">Sold. The cash stays in this wallet.</p>}
+          {p.stage === "closed" && (
+            <div className="stack">
+              <p className="muted center">Sold. The cash stays in this wallet.</p>
+              {BigInt(p.balance?.lamports ?? "0") > 0n && (
+                <button className="btn" onClick={() => setCashingOut(true)}>Cash out to Zcash</button>
+              )}
+            </div>
+          )}
         </>
       ) : (
         <>
@@ -196,6 +206,7 @@ export function PositionScreen({ id }: { id: string }) {
         </button>
       </Sheet>
       <SendSheet open={sending} onClose={() => setSending(false)} p={p} />
+      <CashOutSheet open={cashingOut} onClose={() => setCashingOut(false)} p={p} />
       <KeySheet open={showKey} onClose={() => setShowKey(false)} p={p} onReveal={() => updatePosition(p.id, (x) => void (x.keyRevealed = true))} />
     </div>
   );

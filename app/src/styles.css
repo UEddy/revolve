@@ -276,6 +276,12 @@ h3 { font-size: 16px; margin: 0; }
 .steps .todo .label { color: var(--faint); }
 @keyframes pulse { 50% { transform: scale(0.6); opacity: 0.5; } }
 
+/* ---------- cash out to Zcash ---------- */
+.howto { margin: 4px 0 6px; padding-left: 20px; }
+.howto li { margin: 0 0 6px; }
+.field-label { display: block; margin: 14px 0 6px; font-size: 13px; font-weight: 600; color: var(--muted); }
+.row > .input.grow { min-width: 0; }
+
 /* ---------- sheet ---------- */
 .scrim { position: fixed; inset: 0; background: var(--scrim); z-index: 20; animation: fade 200ms both; }
 .sheet {

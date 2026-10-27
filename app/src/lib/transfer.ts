@@ -10,7 +10,7 @@ import { rpc } from "./solana.ts";
 
 export const SYSTEM_PROGRAM = "11111111111111111111111111111111";
 export const ATA_PROGRAM = "ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL";
-const FEE_LAMPORTS = 5_000n;
+export const FEE_LAMPORTS = 5_000n;
 
 type Meta = { key: string; signer: boolean; writable: boolean };
 export type Ix = { program: string; accounts: Meta[]; data: Uint8Array };
@@ -118,6 +118,15 @@ export async function tokenIxs(from: string, to: string, mint: string, tokenProg
   ];
 }
 
+/** Sent, but not confirmed within the wait: it may still land, so callers must not just send again. */
+export class UnconfirmedTransfer extends Error {
+  readonly sig: string;
+  constructor(sig: string) {
+    super("The transfer was sent but not confirmed yet. Check again in a minute.");
+    this.sig = sig;
+  }
+}
+
 async function submit(key: BurnerKey, ixs: Ix[]): Promise<string> {
   const { value } = await rpc<{ value: { blockhash: string } }>("getLatestBlockhash", [{ commitment: "confirmed" }]);
   const tx = unsignedTx(compileMessage(key.pub, ixs, value.blockhash), 1);
@@ -130,7 +139,7 @@ async function submit(key: BurnerKey, ixs: Ix[]): Promise<string> {
     if (s?.err) throw new Error("The transfer failed on chain");
     if (s && (s.confirmationStatus === "confirmed" || s.confirmationStatus === "finalized")) return sig;
   }
-  throw new Error("The transfer was sent but not confirmed yet. Check again in a minute.");
+  throw new UnconfirmedTransfer(sig);
 }
 
 type TokenAccounts = { value: { pubkey: string; account: { owner: string; data: { parsed: { info: { tokenAmount: { amount: string; decimals: number } } } } } }[] };
@@ -142,6 +151,12 @@ export async function sendAllToken(key: BurnerKey, mint: string, to: string): Pr
   if (!acct) throw new Error("Nothing to send");
   const info = acct.account.data.parsed.info.tokenAmount;
   return submit(key, await tokenIxs(key.pub, to, mint, acct.account.owner, acct.pubkey, BigInt(info.amount), info.decimals));
+}
+
+/** Sends exactly `amount` lamports (the fee comes on top). */
+export function sendCash(key: BurnerKey, to: string, amount: bigint): Promise<string> {
+  if (amount <= 0n) throw new Error("Nothing to send");
+  return submit(key, [cashIx(key.pub, to, amount)]);
 }
 
 /** Sends all cash except the network fee. */
