@@ -7,7 +7,7 @@ import { ORDER_API } from "./config.ts";
 import { b64, fromB64 } from "./bytes.ts";
 import { call, mock as orderMock, OrderApiError } from "./orders.ts";
 import { parseZec } from "./amount.ts";
-import { CREDIT_ZATS, type SpendOutcome } from "./credits.ts";
+import { CREDIT_ZATS, spendOutcomeFor, type SpendOutcome } from "./credits.ts";
 import type { CreditToken, FundingStatus } from "./model.ts";
 
 const ID = /^[A-Za-z0-9_]{8,64}$/;
@@ -61,17 +61,14 @@ export async function spend(amountZec: string, tokens: CreditToken[], burner: st
     return { outcome: "created", orderId: r.order_id, payoutLamports: r.payout_lamports };
   } catch (e) {
     if (!(e instanceof OrderApiError)) return { outcome: "network", message: "No answer from Revolve. Retrying with the same credits." };
-    if (e.code === "amount_unavailable") return { outcome: "unavailable", message: e.message };
-    if (e.code === "token_spent") return { outcome: "spent", message: e.message };
-    if (e.code === "invalid_tokens") return { outcome: "invalid", message: e.message };
-    return { outcome: "error", message: e.message };
+    return { outcome: spendOutcomeFor(e.code), message: e.message };
   }
 }
 
 // ---- demo mode: a real blind-RSA mint with a throwaway key, in this tab only ----
 
 const MOCK_KEY = "revolve.mock.mint";
-type MockMint = { pub: JsonWebKey; priv: JsonWebKey; spki: string; fundings: Record<string, { amount: string; credits: number; created: number; minted: boolean }>; spent: string[] };
+type MockMint = { pub: JsonWebKey; priv: JsonWebKey; spki: string; fundings: Record<string, { amount: string; credits: number; created: number; minted: boolean; setKey?: string }>; spent: string[]; spends?: Record<string, { order_id: string; payout_lamports: string }> };
 let mockCache: Promise<{ state: MockMint; priv: CryptoKey; pub: CryptoKey }> | null = null;
 
 const mintMock = {
@@ -127,11 +124,16 @@ const mintMock = {
   async sign(fundId: string, blinded: string[]): Promise<{ signatures: string[] }> {
     const { state, priv } = await mintMock.load();
     const f = state.fundings[fundId];
-    if (!f || f.minted) throw new OrderApiError("These credits were already issued.", 409, "already_minted");
+    if (!f) throw new OrderApiError("Order not found", 404, "not_found");
+    if (!f.minted && (await mintMock.status(fundId))?.status !== "funded") throw new OrderApiError("This funding has not arrived yet.", 409, "not_funded");
     if (blinded.length !== f.credits) throw new OrderApiError("wrong number of credits", 400, "invalid_blinded");
+    // Like the worker: the same set (in any order) is signed again; any other set is refused once minted.
+    const setKey = [...blinded].sort().join(",");
+    if (f.minted && f.setKey !== setKey) throw new OrderApiError("These credits were already issued.", 409, "already_minted");
     const s = RSABSSA.SHA384.PSS.Randomized();
     const signatures = await Promise.all(blinded.map(async (m) => b64(await s.blindSign(priv, fromB64(m)))));
     f.minted = true;
+    f.setKey = setKey;
     mintMock.save(state);
     return { signatures };
   },
@@ -144,9 +146,15 @@ const mintMock = {
       if (!(await s.verify(pub, fromB64(t.sig), fromB64(t.msg)).catch(() => false))) throw new OrderApiError("Some credits were not accepted.", 400, "invalid_tokens");
       hashes.push(b64(new Uint8Array(await crypto.subtle.digest("SHA-256", fromB64(t.msg) as Uint8Array<ArrayBuffer>))));
     }
+    // Like the worker: resending the very same tokens, amount and burner gets the same order.
+    const spendKey = `${[...hashes].sort().join(",")}|${body.amount_zec}|${body.burner}`;
+    const prior = state.spends?.[spendKey];
+    if (prior) return prior;
     if (hashes.some((h) => state.spent.includes(h))) throw new OrderApiError("Some of these credits were already used.", 409, "token_spent");
     state.spent.push(...hashes);
+    const order = orderMock.credit(body.amount_zec);
+    (state.spends ??= {})[spendKey] = order;
     mintMock.save(state);
-    return orderMock.credit(body.amount_zec);
+    return order;
   },
 };

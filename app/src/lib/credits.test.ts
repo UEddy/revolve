@@ -2,7 +2,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { RSABSSA } from "@cloudflare/blindrsa-ts";
 import { b64, fromB64 } from "./bytes.ts";
-import { blindFor, buildFundMemo, creditsFor, importMintKey, keyFingerprint, tokensAfter, unblindAll, verifyToken } from "./credits.ts";
+import { afterSignError, blindFor, buildFundMemo, creditsFor, importMintKey, keyFingerprint, spendOutcomeFor, tokensAfter, unblindAll, verifyToken } from "./credits.ts";
 import { assertionFlags } from "./passkey.ts";
 import { creditWarnings } from "./coach.ts";
 import { emptyCredits, type Credits } from "./model.ts";
@@ -63,6 +63,29 @@ test("spend answers decide what happens to the tokens (contract App rules)", () 
   assert.equal(tokensAfter("invalid"), "drop");
   assert.equal(tokensAfter("network"), "keep_pending");
   assert.equal(tokensAfter("error"), "keep_pending");
+  assert.equal(tokensAfter("wait"), "keep_pending");
+});
+
+test("spend error codes: refused with nothing consumed returns the tokens, mint_unavailable keeps them pending", () => {
+  // Answered only after the spent check, or refusing the request itself: nothing was consumed, even by an earlier try.
+  for (const code of ["amount_unavailable", "busy", "no_price", "invalid_amount", "invalid_burner"]) {
+    assert.equal(tokensAfter(spendOutcomeFor(code)), "return", code);
+  }
+  assert.equal(tokensAfter(spendOutcomeFor("token_spent")), "drop");
+  assert.equal(tokensAfter(spendOutcomeFor("invalid_tokens")), "drop");
+  assert.equal(spendOutcomeFor("mint_unavailable"), "wait");
+  // Unknown codes and bare 5xx: no clear answer, so the same tokens are retried.
+  assert.equal(spendOutcomeFor(undefined), "error");
+  assert.equal(spendOutcomeFor("invalid_json"), "error");
+});
+
+test("sign errors: a different set or a refused set needs review, a moved status is re-read, the rest is retried", () => {
+  assert.equal(afterSignError(409, "already_minted"), "review");
+  assert.equal(afterSignError(400, "invalid_blinded"), "review");
+  assert.equal(afterSignError(409, "not_funded"), "refresh");
+  assert.equal(afterSignError(404, "not_found"), "refresh");
+  assert.equal(afterSignError(503, "mint_unavailable"), "retry");
+  assert.equal(afterSignError(502, undefined), "retry");
 });
 
 test("fund memo and credit arithmetic", () => {
