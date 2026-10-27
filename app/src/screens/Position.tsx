@@ -72,7 +72,7 @@ function Steps({ p }: { p: Position }) {
 }
 
 export function PositionScreen({ id }: { id: string }) {
-  const { data, updatePosition } = useVault();
+  const { data, updatePosition, confirm } = useVault();
   const { prices, busy, retrySwap, sell, priceOf } = useEngine();
   const [sending, setSending] = useState(false);
   const [selling, setSelling] = useState(false);
@@ -171,7 +171,7 @@ export function PositionScreen({ id }: { id: string }) {
             <div className="card flat">
               <h3>The buy didn't go through</h3>
               <p className="muted">{p.swap?.error ?? "Unknown error"}. Your funds are safe in this position's wallet.</p>
-              <button className="btn" disabled={!!doing} onClick={() => retrySwap(p.id)}>{doing ? <Spinner /> : null} Try again</button>
+              <button className="btn" disabled={!!doing} onClick={() => retrySwap(p.id).catch((e) => setError(errorText(e)))}>{doing ? <Spinner /> : null} Try again</button>
             </div>
           )}
           <div className="spacer" />
@@ -207,15 +207,19 @@ export function PositionScreen({ id }: { id: string }) {
       </Sheet>
       <SendSheet open={sending} onClose={() => setSending(false)} p={p} />
       <CashOutSheet open={cashingOut} onClose={() => setCashingOut(false)} p={p} />
-      <KeySheet open={showKey} onClose={() => setShowKey(false)} p={p} onReveal={() => updatePosition(p.id, (x) => void (x.keyRevealed = true))} />
+      <KeySheet open={showKey} onClose={() => setShowKey(false)} p={p} onReveal={() => updatePosition(p.id, (x) => void (x.keyRevealed = true))} confirm={confirm} />
     </div>
   );
 }
 
-function KeySheet({ open, onClose, p, onReveal }: { open: boolean; onClose: () => void; p: Position; onReveal: () => void }) {
+function KeySheet({ open, onClose, p, onReveal, confirm }: { open: boolean; onClose: () => void; p: Position; onReveal: () => void; confirm: () => Promise<void> }) {
   const [shown, setShown] = useState(false);
+  const [error, setError] = useState<string | null>(null);
   useEffect(() => {
-    if (!open) setShown(false);
+    if (!open) {
+      setShown(false);
+      setError(null);
+    }
   }, [open]);
   return (
     <Sheet open={open} onClose={onClose}>
@@ -227,14 +231,22 @@ function KeySheet({ open, onClose, p, onReveal }: { open: boolean; onClose: () =
           <p>A wallet app that holds this key next to your other wallets, or your known wallet, can link them. Anyone with this key can take the funds.</p>
         </div>
       </div>
+      {error && <p className="err">{error}</p>}
       {shown ? (
         <p className="mono card sunk">{exportKey(p)}</p>
       ) : (
         <button
           className="btn danger"
           onClick={() => {
-            setShown(true);
-            onReveal();
+            setError(null);
+            // The key can take everything in this wallet: shown only after a fresh passkey check.
+            (p.demo ? Promise.resolve() : confirm()).then(
+              () => {
+                setShown(true);
+                onReveal();
+              },
+              (e: unknown) => setError(errorText(e)),
+            );
           }}
         >
           Show key

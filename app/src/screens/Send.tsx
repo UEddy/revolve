@@ -1,5 +1,6 @@
 // Sending out of a position: the riskiest thing a user can do here, so the
-// coach speaks first and a high-risk send needs an explicit confirm.
+// coach speaks first, a high-risk send needs an explicit confirm, and every
+// send needs a fresh passkey check.
 
 import { useEffect, useState } from "react";
 import { useVault } from "../state/vault.tsx";
@@ -11,7 +12,7 @@ import type { Position } from "../lib/model.ts";
 import { Sheet, Spinner, Warnings, errorText } from "../components/bits.tsx";
 
 export function SendSheet({ open, onClose, p }: { open: boolean; onClose: () => void; p: Position }) {
-  const { data, updatePosition } = useVault();
+  const { data, updatePosition, confirm } = useVault();
   const [what, setWhat] = useState<"asset" | "cash">("asset");
   const [to, setTo] = useState("");
   const [ok, setOk] = useState(false);
@@ -36,6 +37,7 @@ export function SendSheet({ open, onClose, p }: { open: boolean; onClose: () => 
     try {
       const dest = to.trim();
       if (p.demo) throw new Error("Demo positions hold no real funds");
+      await confirm();
       const sig = what === "asset" ? await sendAllToken(p.burner, p.token.mint, dest) : await sendAllCash(p.burner, dest, await lamports(p.burner.pub));
       await updatePosition(p.id, (x) => {
         x.sends.push({ to: dest, at: Date.now(), sig, what });

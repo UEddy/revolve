@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { useVault } from "../state/vault.tsx";
 import { MOCK } from "../lib/config.ts";
+import { errorText } from "../components/bits.tsx";
 
 function download(name: string, text: string) {
   const url = URL.createObjectURL(new Blob([text], { type: "application/json" }));
@@ -14,8 +15,9 @@ function download(name: string, text: string) {
 }
 
 export function Settings() {
-  const { lock, exportBackup, destroy, data } = useVault();
+  const { lock, exportBackup, destroy, data, confirm: confirmUser } = useVault();
   const [confirm, setConfirm] = useState("");
+  const [eraseError, setEraseError] = useState<string | null>(null);
   const count = data?.positions.length ?? 0;
   return (
     <div className="screen">
@@ -65,7 +67,18 @@ export function Settings() {
           hold are gone for good.
         </p>
         <input className="input" placeholder='Type "erase" to confirm' value={confirm} onChange={(e) => setConfirm(e.target.value)} />
-        <button className="btn danger" disabled={confirm.trim().toLowerCase() !== "erase"} onClick={destroy}>Erase vault</button>
+        {eraseError && <p className="err">{eraseError}</p>}
+        <button
+          className="btn danger"
+          disabled={confirm.trim().toLowerCase() !== "erase"}
+          onClick={() => {
+            setEraseError(null);
+            // Erasing loses every wallet without a backup: the passkey has to agree, not just the screen.
+            confirmUser().then(destroy, (e: unknown) => setEraseError(errorText(e)));
+          }}
+        >
+          Erase vault
+        </button>
       </div>
     </div>
   );
