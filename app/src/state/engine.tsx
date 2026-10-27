@@ -24,7 +24,8 @@ type Engine = {
   prices: Record<string, number>;
   busy: Record<string, string>;
   startOrder(token: TokenRef, amountZec: string): Promise<string>;
-  retrySwap(id: string): void;
+  /** User-started signing (a retried buy, a sale) asks for a fresh passkey check first; the automatic buy after a payout does not. */
+  retrySwap(id: string): Promise<void>;
   sell(id: string): Promise<void>;
   refresh(id: string): void;
   /** Fetches one asset's price now (no wallet involved, so no stagger needed). */
@@ -243,17 +244,21 @@ export function EngineProvider({ children }: { children: ReactNode }) {
   }, [positions, runSwap, updatePosition]);
 
   const retrySwap = useCallback(
-    (id: string) => {
+    async (id: string) => {
       const p = latest.current.find((x) => x.id === id);
-      if (p) void runSwap(p);
+      if (!p) return;
+      if (!p.demo) await vault.confirm();
+      void runSwap(p);
     },
-    [runSwap],
+    [runSwap, vault],
   );
 
   const sell = useCallback(
     async (id: string) => {
       const p = latest.current.find((x) => x.id === id);
       if (!p || inFlight.current.has(id)) return;
+      // Before anything is marked busy, so a cancelled prompt changes nothing.
+      if (!p.demo) await vault.confirm();
       inFlight.current.add(id);
       setBusyFor(id, "Selling");
       try {
@@ -274,7 +279,7 @@ export function EngineProvider({ children }: { children: ReactNode }) {
         setBusyFor(id, null);
       }
     },
-    [updatePosition],
+    [updatePosition, vault],
   );
 
   // ---- staggered balance checks, one burner at a time ----

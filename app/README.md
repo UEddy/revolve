@@ -59,6 +59,8 @@ Fund once with shielded ZEC, then buy with a passkey tap. 1 credit = 0.001 ZEC.
 
 ## Privacy notes
 
+- Fresh passkey checks (WebAuthn, user verification required, this vault's own passkey): every user-started signing (sell, retrying a buy, send, cash out, a credits spend), showing a wallet's key, and erasing the vault. The one exception is the automatic buy right after a payout lands, which the user already approved by paying (in Zodl, or with a passkey for credits); it only swaps that wallet's SOL into the token they chose.
+
 - Fonts are bundled; the page loads nothing from third parties. Token icons come through the relay.
 - The relay and the worker see the phone's IP. Neither logs it, and both sit behind a reverse proxy on our own droplet with access logs off. The static host (Vercel) only serves the app's files, so its logs show who opened the app, not what they did.
 - Cash out: the swap provider behind Zodl publishes each swap on its own chain (the deposit from this wallet, the amount, the time); the ZEC lands shielded in the user's Zodl. The coach warns when cashing out within an hour of buying and when one cash-out moves a whole large position (over $250, or 2 SOL without a price), since timing and amount can pair the two ends, and on reusing an old deposit address or sending to another own wallet.
