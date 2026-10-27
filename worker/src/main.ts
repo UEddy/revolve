@@ -46,6 +46,7 @@ createApi({
   quoteTtlSecs: cfg.quoteTtlSecs,
   maxOpenOrders: cfg.maxOpenOrders,
   quote: (zat) => pricing.payoutLamports(zat),
+  usdPerZec: () => pricing.indicativeUsdPerZec(),
   freeInventory: () => {
     const balance = payer.cachedBalance();
     return balance === null ? null : balance - cfg.solReserveLamports - book.committedLamports();

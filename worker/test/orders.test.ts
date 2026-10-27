@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import { Keypair } from "@solana/web3.js";
 import { openDb } from "../src/db.ts";
-import { OrderBook, isOrderId, newOrderId, parseMemo, zatToZec, type NoteLine } from "../src/orders.ts";
+import { OrderBook, isOrderId, newOrderId, onGrid, parseMemo, zatToZec, zecToZat, type NoteLine } from "../src/orders.ts";
 
 const burner = Keypair.generate().publicKey.toBase58();
 
@@ -34,9 +34,26 @@ test("zec formatting", () => {
   assert.equal(zatToZec(100_000_000n), "1");
 });
 
+test("zec parsing is strict decimal", () => {
+  assert.equal(zecToZat("0.004"), 400_000n);
+  assert.equal(zecToZat("0.0040"), 400_000n);
+  assert.equal(zecToZat("1"), 100_000_000n);
+  assert.equal(zecToZat("12.00000001"), 1_200_000_001n);
+  for (const bad of ["", ".004", "0.", "-0.004", "+1", "1e-3", "0x10", "00.004", " 0.004", "0.000000001", "123456789"]) {
+    assert.equal(zecToZat(bad), null, bad);
+  }
+});
+
+test("order amount grid", () => {
+  assert.ok(onGrid(200_000n));
+  assert.ok(onGrid(400_000n));
+  assert.ok(!onGrid(100_000n), "below min");
+  assert.ok(!onGrid(450_000n), "off grid");
+});
+
 test("happy path: seen, confirmed, delayed payout, then mapping deleted", () => {
   const { book } = setup();
-  const o = book.create("0.01", 123n, 1800);
+  const o = book.create(1_000_000n, 123n, 1800);
   assert.equal(o.amount_zec, "0.01");
   assert.equal(o.quote_expires_at, "2026-10-27T10:30:00Z");
   assert.equal(book.get(o.order_id)!.status, "awaiting_payment");
@@ -67,7 +84,7 @@ test("happy path: seen, confirmed, delayed payout, then mapping deleted", () => 
 
 test("paid cache expires to 404", () => {
   const { book, advance } = setup();
-  const o = book.create("0.005", 1n, 1800);
+  const o = book.create(500_000n, 1n, 1800);
   const memo = `rv1|${o.order_id}|${burner}`;
   book.onNote(note(memo, 500_000, 20));
   book.markPaying(o.order_id, "s", 1);
@@ -78,22 +95,34 @@ test("paid cache expires to 404", () => {
 
 test("wrong amount goes to needs_review", () => {
   const { book } = setup();
-  const o = book.create("0.01", 1n, 1800);
+  const o = book.create(1_000_000n, 1n, 1800);
   book.onNote(note(`rv1|${o.order_id}|${burner}`, 999_999, 5));
   assert.equal(book.get(o.order_id)!.status, "needs_review");
   assert.equal(book.due().length, 0);
 });
 
+test("a free amount on the grid matches exactly, nothing else", () => {
+  const { book } = setup();
+  const o = book.create(400_000n, 52_345_678n, 1800);
+  assert.equal(o.amount_zec, "0.004");
+  book.onNote(note(`rv1|${o.order_id}|${burner}`, 400_000, 1));
+  assert.equal(book.get(o.order_id)!.status, "seen");
+
+  const near = book.create(400_000n, 1n, 1800);
+  book.onNote(note(`rv1|${near.order_id}|${burner}`, 400_001, 5, "bb".repeat(32)));
+  assert.equal(book.get(near.order_id)!.status, "needs_review");
+});
+
 test("invalid burner goes to needs_review", () => {
   const { book } = setup();
-  const o = book.create("0.01", 1n, 1800);
+  const o = book.create(1_000_000n, 1n, 1800);
   book.onNote(note(`rv1|${o.order_id}|notakey`, 1_000_000, 5));
   assert.equal(book.get(o.order_id)!.status, "needs_review");
 });
 
 test("expiry, and payment after expiry needs review", () => {
   const { book, advance } = setup();
-  const o = book.create("0.01", 1n, 60);
+  const o = book.create(1_000_000n, 1n, 60);
   advance(61_000);
   book.expire();
   assert.equal(book.get(o.order_id)!.status, "expired");
@@ -103,7 +132,7 @@ test("expiry, and payment after expiry needs review", () => {
 
 test("second payment to the same order does not pay twice", () => {
   const { book } = setup();
-  const o = book.create("0.01", 1n, 1800);
+  const o = book.create(1_000_000n, 1n, 1800);
   const memo = `rv1|${o.order_id}|${burner}`;
   book.onNote(note(memo, 1_000_000, 20, "aa".repeat(32)));
   book.onNote(note(memo, 1_000_000, 20, "bb".repeat(32)));
@@ -112,7 +141,7 @@ test("second payment to the same order does not pay twice", () => {
 
 test("expired in-flight payout can be retried", () => {
   const { book } = setup();
-  const o = book.create("0.01", 1n, 1800);
+  const o = book.create(1_000_000n, 1n, 1800);
   book.onNote(note(`rv1|${o.order_id}|${burner}`, 1_000_000, 20));
   book.markPaying(o.order_id, "s", 50);
   assert.deepEqual(book.inFlight(), [{ orderId: o.order_id, signature: "s", validUntilBlockHeight: 50 }]);
@@ -122,7 +151,7 @@ test("expired in-flight payout can be retried", () => {
 
 test("a payout can be claimed by only one process", () => {
   const { book } = setup();
-  const o = book.create("0.01", 1n, 1800);
+  const o = book.create(1_000_000n, 1n, 1800);
   book.onNote(note(`rv1|${o.order_id}|${burner}`, 1_000_000, 20));
   assert.equal(book.markPaying(o.order_id, "first", 50), true);
   assert.equal(book.markPaying(o.order_id, "second", 50), false);
@@ -138,7 +167,7 @@ test("review note confirmations follow re-emitted lines", () => {
 
 test("bind a review note to an expired order's quote, pay once", () => {
   const { book, advance } = setup();
-  const o = book.create("0.005", 65_000_000n, 60);
+  const o = book.create(500_000n, 65_000_000n, 60);
   advance(61_000);
   book.expire();
   book.onNote(note("Love", 500_000, 5));
@@ -161,7 +190,7 @@ test("bind a review note to an expired order's quote, pay once", () => {
 
 test("bind refuses an order that already has a note", () => {
   const { book } = setup();
-  const o = book.create("0.005", 1n, 1800);
+  const o = book.create(500_000n, 1n, 1800);
   book.onNote(note(`rv1|${o.order_id}|${burner}`, 500_000, 5, "aa".repeat(32)));
   book.onNote(note("Love", 500_000, 5, "bb".repeat(32)));
   const key = book.reviewNotes()[0].note_key;

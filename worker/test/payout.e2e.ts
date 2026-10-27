@@ -16,7 +16,7 @@ console.log("hot balance", await payer.refreshBalance());
 
 const book = new OrderBook(openDb(":memory:"));
 const burner = Keypair.generate().publicKey.toBase58();
-const o = book.create("0.01", 30_000_000n, 1800);
+const o = book.create(1_000_000n, 30_000_000n, 1800);
 const memo = `rv1|${o.order_id}|${burner}`;
 const line = (c: number) => ({ txid: "cd".repeat(32), pool: "ironwood", output_index: 0, value: 1_000_000, memo, height: 1, confirmations: c });
 
