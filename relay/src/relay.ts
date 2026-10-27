@@ -8,6 +8,8 @@
 // once). Rate limits are global, never per client: the relay keeps no
 // state about who is asking.
 
+import { lookup } from "node:dns/promises";
+import { isIP } from "node:net";
 import { nftList, projectNft, projectOpenSea, projectPolymarket, type NftCollection, type NftEntry } from "./feeds.ts";
 
 export type RelayEnv = {
@@ -157,6 +159,8 @@ export class Bucket {
 
 export type RelayState = {
   cache: ResponseCache;
+  /** Every address a hostname resolves to; icon fetches refuse any that is private. Tests replace it. */
+  resolve: (host: string) => Promise<string[]>;
   limits: { rpc: Bucket; jup: Bucket; img: Bucket; feeds: Bucket };
   /** Last good body of each feed, served when its upstream fails or rate-limits. */
   stale: Map<string, Uint8Array<ArrayBuffer>>;
@@ -165,6 +169,7 @@ export type RelayState = {
 export function newState(): RelayState {
   return {
     cache: new ResponseCache(24 * 1024 * 1024),
+    resolve: async (host) => (await lookup(host, { all: true, verbatim: true })).map((a) => a.address),
     limits: { rpc: new Bucket(25, 50), jup: new Bucket(8, 20), img: new Bucket(40, 80), feeds: new Bucket(1, 4) },
     stale: new Map(),
   };
@@ -257,10 +262,44 @@ export async function handleJup(req: Request, env: RelayEnv, state: RelayState):
 }
 
 /** GET a fixed upstream URL. The only headers sent are these: never anything from the client. */
+/** Reads a body up to `max` bytes, or null as soon as it is larger. Never buffers more than `max`. */
+export async function readCapped(res: Response, max: number): Promise<Uint8Array<ArrayBuffer> | null> {
+  const declared = Number(res.headers.get("content-length") ?? "");
+  if (Number.isFinite(declared) && declared > max) {
+    await res.body?.cancel();
+    return null;
+  }
+  if (!res.body) return new Uint8Array(0);
+  const reader = res.body.getReader();
+  const parts: Uint8Array[] = [];
+  let size = 0;
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    size += value.length;
+    if (size > max) {
+      await reader.cancel();
+      return null;
+    }
+    parts.push(value);
+  }
+  const out = new Uint8Array(size);
+  let at = 0;
+  for (const p of parts) {
+    out.set(p, at);
+    at += p.length;
+  }
+  return out;
+}
+
+const MAX_FEED_BODY = 4 * 1024 * 1024;
+
 async function upstreamJson(url: string, headers: Record<string, string> = {}): Promise<unknown> {
   const res = await fetch(url, { headers: { accept: "application/json", ...headers }, signal: AbortSignal.timeout(15_000) });
   if (!res.ok) throw new Error(`upstream ${res.status}`);
-  return res.json();
+  const body = await readCapped(res, MAX_FEED_BODY);
+  if (body === null) throw new Error("upstream body too large");
+  return JSON.parse(new TextDecoder().decode(body));
 }
 
 /** Collection metadata (name, image): best effort, cached a day; after a failure not retried for an hour. */
@@ -333,6 +372,41 @@ export function handleFeed(req: Request, env: RelayEnv, state: RelayState, which
   });
 }
 
+/**
+ * True for addresses an icon fetch must never reach: loopback, private,
+ * link-local (cloud metadata), CGNAT, multicast, reserved, and their IPv6 forms.
+ */
+export function privateAddress(ip: string): boolean {
+  const v4 = (a: string) => {
+    const p = a.split(".").map(Number);
+    if (p.length !== 4 || p.some((n) => !Number.isInteger(n) || n < 0 || n > 255)) return true;
+    const [a0, a1] = p as [number, number, number, number];
+    return (
+      a0 === 0 || a0 === 10 || a0 === 127 || a0 >= 224 ||
+      (a0 === 100 && a1 >= 64 && a1 <= 127) ||
+      (a0 === 169 && a1 === 254) ||
+      (a0 === 172 && a1 >= 16 && a1 <= 31) ||
+      (a0 === 192 && a1 === 168) ||
+      (a0 === 192 && a1 === 0 && p[2] === 0) ||
+      (a0 === 198 && (a1 === 18 || a1 === 19))
+    );
+  };
+  const kind = isIP(ip);
+  if (kind === 4) return v4(ip);
+  if (kind !== 6) return true;
+  const h = ip.toLowerCase();
+  const mapped = /^::ffff:(\d+\.\d+\.\d+\.\d+)$/.exec(h);
+  if (mapped) return v4(mapped[1]!);
+  return h === "::" || h === "::1" || /^f[cd]/.test(h) || /^fe[89ab]/.test(h) || h.startsWith("ff") || h.startsWith("64:ff9b:") || h.startsWith("2001:db8:");
+}
+
+const MAX_REDIRECTS = 3;
+
+/** An icon URL we may fetch: https on the default port, no credentials, a public name. */
+function allowedIconUrl(u: URL): boolean {
+  return u.protocol === "https:" && (u.port === "" || u.port === "443") && !u.username && !u.password && !blockedHost(u.hostname);
+}
+
 /** True for hostnames we refuse to fetch: IP literals and local names. */
 export function blockedHost(host: string): boolean {
   const h = host.toLowerCase().replace(/^\[|\]$/g, "");
@@ -357,9 +431,7 @@ export async function handleImg(req: Request, state: RelayState): Promise<Respon
   } catch {
     return json(400, { error: "bad url" });
   }
-  if (src.protocol !== "https:" || blockedHost(src.hostname) || src.username || src.password) {
-    return json(400, { error: "url not allowed" });
-  }
+  if (!allowedIconUrl(src)) return json(400, { error: "url not allowed" });
   const hit = state.cache.get(src.href);
   if (hit?.status === 200) return new Response(hit.body, { status: 200, headers: { "content-type": hit.type, ...IMAGE_HEADERS } });
   if (hit) return json(502, { error: "icon unavailable" }, { "cache-control": "public, max-age=30" });
@@ -372,18 +444,50 @@ export async function handleImg(req: Request, state: RelayState): Promise<Respon
     state.cache.set(src.href, { until: Date.now() + (transient ? 30_000 : 600_000), status: 502, type: "", body: new Uint8Array(0) });
     return json(502, { error });
   };
-  let upstream: Response;
+  // Redirects are followed by hand so every hop is checked like the first:
+  // https, public name, and every address it resolves to public. (A name
+  // could still re-resolve between this check and the connection; that
+  // window is accepted, since nothing fetched is returned unless it is an image.)
+  let upstream: Response | null = null;
+  let at = src;
+  const deadline = AbortSignal.timeout(8_000);
   try {
-    upstream = await fetch(src, { headers: { accept: "image/*" }, redirect: "follow", signal: AbortSignal.timeout(8_000) });
+    for (let hop = 0; hop <= MAX_REDIRECTS; hop++) {
+      const addrs = await state.resolve(at.hostname);
+      if (!addrs.length || addrs.some(privateAddress)) return fail("not an image", false);
+      const r = await fetch(at, { headers: { accept: "image/*" }, redirect: "manual", signal: deadline });
+      if (r.status < 300 || r.status >= 400) {
+        upstream = r;
+        break;
+      }
+      await r.body?.cancel();
+      const next = r.headers.get("location");
+      let to: URL;
+      try {
+        to = new URL(next ?? "", at);
+      } catch {
+        return fail("not an image", false);
+      }
+      if (!next || !allowedIconUrl(to)) return fail("not an image", false);
+      at = to;
+    }
   } catch {
     return fail("fetch failed", true);
   }
-  const finalHost = new URL(upstream.url || src.href).hostname;
+  if (!upstream) return fail("too many redirects", false);
   const type = (upstream.headers.get("content-type") ?? "").split(";")[0]!.trim().toLowerCase();
   if (upstream.status >= 500) return fail("upstream error", true);
-  if (!upstream.ok || blockedHost(finalHost) || !IMAGE_TYPES.test(type)) return fail("not an image", false);
-  const bytes = new Uint8Array(await upstream.arrayBuffer());
-  if (bytes.length > MAX_IMAGE) return fail("image too large", false);
+  if (!upstream.ok || !IMAGE_TYPES.test(type)) {
+    await upstream.body?.cancel();
+    return fail("not an image", false);
+  }
+  let bytes: Uint8Array<ArrayBuffer> | null;
+  try {
+    bytes = await readCapped(upstream, MAX_IMAGE);
+  } catch {
+    return fail("fetch failed", true);
+  }
+  if (bytes === null) return fail("image too large", false);
   state.cache.set(src.href, { until: Date.now() + 6 * 3600_000, status: 200, type, body: bytes });
   return new Response(bytes, { status: 200, headers: { "content-type": type, ...IMAGE_HEADERS } });
 }

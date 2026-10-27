@@ -2,7 +2,13 @@ import { mock, test } from "node:test";
 import assert from "node:assert/strict";
 import { createServer } from "node:http";
 import type { AddressInfo } from "node:net";
-import { blockedHost, Bucket, createRelay, handleImg, handleJup, handleRpc, newState, ResponseCache } from "../src/relay.ts";
+import { blockedHost, Bucket, createRelay, handleImg, handleJup, handleRpc, newState, privateAddress, readCapped, ResponseCache, type RelayState } from "../src/relay.ts";
+
+/** Tests never touch real DNS: every name resolves to one public address. */
+function publicDns(s: RelayState, table: Record<string, string[]> = {}): RelayState {
+  s.resolve = async (host) => table[host] ?? ["93.184.216.34"];
+  return s;
+}
 import { toNode } from "../src/node.ts";
 
 const post = (body: unknown) => new Request("https://relay.test/rpc", { method: "POST", body: JSON.stringify(body) });
@@ -121,7 +127,7 @@ test("a slow-moment failure is retried after 30 s; a definite one stays cached f
   mock.timers.enable({ apis: ["Date"], now: 0 });
   const f = stubFetch((url) => new Response("x", { status: url.endsWith("/slow") ? 504 : 404 }));
   try {
-    const s = newState();
+    const s = publicDns(newState());
     const get = (p: string) => handleImg(new Request(`https://relay.test/img?u=${encodeURIComponent(`https://img.test${p}`)}`), s);
     await get("/slow");
     await get("/gone");
@@ -141,11 +147,91 @@ test("a slow-moment failure is retried after 30 s; a definite one stays cached f
 test("a dead icon is fetched once, then answered from the negative cache", async () => {
   const f = stubFetch(() => new Response("nope", { status: 504 }));
   try {
-    const s = newState();
+    const s = publicDns(newState());
     const get = () => handleImg(new Request(`https://relay.test/img?u=${encodeURIComponent("https://ipfs.io/ipfs/Qm1")}`), s);
     assert.equal((await get()).status, 502);
     assert.equal((await get()).status, 502);
     assert.equal(f.calls.length, 1);
+  } finally {
+    f.restore();
+  }
+});
+
+test("private, loopback, link-local, CGNAT, multicast and reserved addresses are refused, v4 and v6", () => {
+  for (const ip of ["127.0.0.1", "10.1.2.3", "172.16.0.1", "172.31.255.255", "192.168.1.1", "169.254.169.254", "100.64.0.1", "0.0.0.0", "224.0.0.1", "255.255.255.255", "198.18.0.1", "192.0.0.8",
+    "::1", "::", "fc00::1", "fd12::1", "fe80::1", "ff02::1", "::ffff:127.0.0.1", "::ffff:10.0.0.1", "64:ff9b::a00:1", "2001:db8::1", "not-an-ip"]) {
+    assert.ok(privateAddress(ip), ip);
+  }
+  for (const ip of ["93.184.216.34", "1.1.1.1", "172.32.0.1", "100.128.0.1", "2606:4700::1111", "::ffff:8.8.8.8"]) assert.ok(!privateAddress(ip), ip);
+});
+
+const PNG = () => new Response(new Uint8Array([137, 80, 78, 71]), { headers: { "content-type": "image/png" } });
+
+test("icon redirects are followed by hand, and every hop is checked like the first", async () => {
+  const hop = (to: string) => new Response(null, { status: 302, headers: { location: to } });
+  const f = stubFetch((url) => {
+    const u = new URL(url);
+    if (u.pathname === "/to-local") return hop("http://127.0.0.1:8787/limits");
+    if (u.pathname === "/to-metadata") return hop("https://metadata.internal/x");
+    if (u.pathname === "/to-private-name") return hop("https://sneaky.test/x");
+    if (u.pathname === "/to-port") return hop("https://cdn.test:8443/x");
+    if (u.pathname === "/to-good") return hop("/final.png");
+    if (u.pathname === "/loop") return hop("/loop");
+    if (u.pathname === "/final.png") return PNG();
+    return new Response("?", { status: 404 });
+  });
+  try {
+    const s = publicDns(newState(), { "sneaky.test": ["10.0.0.5"] });
+    const get = (path: string) => handleImg(new Request(`https://relay.test/img?u=${encodeURIComponent(`https://cdn.test${path}`)}`), s);
+    for (const bad of ["/to-local", "/to-metadata", "/to-private-name", "/to-port"]) {
+      const before = f.calls.length;
+      assert.equal((await get(bad)).status, 502, bad);
+      assert.equal(f.calls.length, before + 1, `${bad}: the redirect target is never fetched`);
+    }
+    const good = await get("/to-good");
+    assert.equal(good.status, 200);
+    assert.equal(good.headers.get("content-type"), "image/png");
+    assert.equal(f.calls.at(-1)!.url, "https://cdn.test/final.png");
+    const before = f.calls.length;
+    assert.equal((await get("/loop")).status, 502);
+    assert.equal(f.calls.length - before, 4, "the first request plus at most 3 redirects");
+  } finally {
+    f.restore();
+  }
+});
+
+test("an icon host that resolves to a private address is never contacted", async () => {
+  const f = stubFetch(() => PNG());
+  try {
+    const s = publicDns(newState(), { "internal.example": ["192.168.0.10"], "dual.example": ["93.184.216.34", "::1"], "nowhere.example": [] });
+    for (const host of ["internal.example", "dual.example", "nowhere.example"]) {
+      const res = await handleImg(new Request(`https://relay.test/img?u=${encodeURIComponent(`https://${host}/a.png`)}`), s);
+      assert.equal(res.status, 502, host);
+    }
+    assert.equal(f.calls.length, 0);
+    const port = await handleImg(new Request(`https://relay.test/img?u=${encodeURIComponent("https://cdn.test:8443/a.png")}`), s);
+    assert.equal(port.status, 400, "non-default ports are refused up front");
+  } finally {
+    f.restore();
+  }
+});
+
+test("bodies are read with a hard cap, declared or not, and never buffered past it", async () => {
+  const stream = (chunks: number, size: number) =>
+    new ReadableStream<Uint8Array>({
+      start(c) {
+        for (let i = 0; i < chunks; i++) c.enqueue(new Uint8Array(size));
+        c.close();
+      },
+    });
+  assert.equal((await readCapped(new Response(stream(4, 1000)), 4000))?.length, 4000);
+  assert.equal(await readCapped(new Response(stream(5, 1000)), 4000), null, "undeclared and too large");
+  assert.equal(await readCapped(new Response("x".repeat(10), { headers: { "content-length": "999999" } }), 4000), null, "declared too large");
+  const f = stubFetch(() => new Response(stream(3, 512 * 1024), { headers: { "content-type": "image/png" } }));
+  try {
+    const res = await handleImg(new Request(`https://relay.test/img?u=${encodeURIComponent("https://cdn.test/huge.png")}`), publicDns(newState()));
+    assert.equal(res.status, 502);
+    assert.deepEqual(await res.json(), { error: "image too large" });
   } finally {
     f.restore();
   }
