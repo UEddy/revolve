@@ -12,6 +12,7 @@ import { PositionScreen } from "./screens/Position.tsx";
 import { Settings } from "./screens/Settings.tsx";
 import { Compass, Gear, Wallet } from "./components/icons.tsx";
 import { MOCK, ORDER_API } from "./lib/config.ts";
+import { InstallBanner } from "./components/InstallBanner.tsx";
 
 function Tabs({ at }: { at: string }) {
   const tab = (to: string, name: string, label: string, Icon: typeof Wallet) => (
@@ -46,7 +47,13 @@ function Screens() {
       {route.name === "funding" && <FundingScreen key={route.id} id={route.id} />}
       {route.name === "market" && <MarketScreen key={route.id} id={route.id} />}
       {route.name === "nft" && <NftScreen key={route.symbol} symbol={route.symbol} />}
-      {(route.name === "home" || route.name === "discover" || route.name === "settings") && <Tabs at={route.name} />}
+      {(route.name === "home" || route.name === "discover" || route.name === "settings") && (
+        <>
+          <Tabs at={route.name} />
+          {/* Only on the tab screens: never over a payment, funding or buy flow. */}
+          <InstallBanner />
+        </>
+      )}
       </CreditsProvider>
     </EngineProvider>
   );

@@ -24,12 +24,14 @@ button { font: inherit; color: inherit; }
 img { max-width: 100%; }
 a { color: var(--link); }
 :focus-visible { outline: 2px solid var(--accent-mark); outline-offset: 2px; }
+/* Rings only for keyboard focus: a tap or a programmatic focus shows none. */
+:focus:not(:focus-visible) { outline: none; }
 ::placeholder { color: var(--faint); opacity: 1; }
 
 /* ---------- layout ---------- */
 .screen {
   flex: 1;
-  padding: calc(env(safe-area-inset-top, 0px) + 18px) 18px calc(env(safe-area-inset-bottom, 0px) + 96px);
+  padding: calc(env(safe-area-inset-top, 0px) + 18px) 18px calc(env(safe-area-inset-bottom, 0px) + 96px + var(--install-h, 0px));
   animation: enter 360ms var(--ease) both;
 }
 .screen.bare { padding-bottom: calc(env(safe-area-inset-bottom, 0px) + 28px); }
@@ -277,8 +279,38 @@ h3 { font-size: 16px; margin: 0; }
 @keyframes fade { from { opacity: 0; } }
 @keyframes rise { from { transform: translate(-50%, 40px); opacity: 0; } }
 
+/* ---------- install banner ---------- */
+.install {
+  display: grid; grid-template-columns: auto 1fr; align-items: center; gap: 10px 12px; padding: 12px 12px 12px 14px;
+  background: var(--surface); color: var(--ink); border: 1px solid var(--line); border-radius: 20px; box-shadow: var(--shadow);
+  text-align: left; animation: install-in 320ms var(--ease) both;
+}
+/* Welcome and unlock: in the flow, at the bottom of the screen when there is room, else after the buttons. */
+.install.inline { align-self: stretch; margin-top: auto; }
+.welcome > .stack:has(+ .install.inline) { margin-bottom: 24px; }
+/* Tab screens: floating above the tab bar (54px tall, 12px off the bottom). */
+.install.floating {
+  position: fixed; z-index: 15; left: 50%; transform: translateX(-50%);
+  bottom: calc(env(safe-area-inset-bottom, 0px) + 76px); width: calc(100% - 24px); max-width: 456px;
+  animation-name: install-float-in;
+}
+.install-mark { width: 40px; height: 40px; border-radius: 12px; background: var(--sunk); display: grid; place-items: center; }
+.install-mark .mark { width: 28px; height: 28px; }
+.install-text { display: flex; flex-direction: column; gap: 2px; font-size: 14px; line-height: 1.35; }
+.install-share { width: 16px; height: 16px; vertical-align: -3px; }
+.install-actions { grid-column: 1 / -1; display: flex; justify-content: flex-end; gap: 8px; }
+/* Never over an open sheet (buy, send, payment). */
+body:has(.sheet) .install { display: none; }
+@keyframes install-in { from { opacity: 0; transform: translateY(16px); } }
+@keyframes install-float-in { from { opacity: 0; transform: translate(-50%, 16px); } }
+@media (prefers-reduced-motion: reduce) { .install { animation: none; } }
+
 /* ---------- welcome ---------- */
-.welcome { display: flex; flex-direction: column; min-height: 100dvh; padding: calc(env(safe-area-inset-top, 0px) + 40px) 22px calc(env(safe-area-inset-bottom, 0px) + 28px); }
+/* The wordmark sits in the upper third (its top about 18.5% down, under 22% even below the demo strip), the rest follows it. */
+.welcome {
+  display: flex; flex-direction: column; min-height: 100dvh;
+  padding: calc(env(safe-area-inset-top, 0px) + clamp(40px, 18.5dvh, 220px)) 22px calc(env(safe-area-inset-bottom, 0px) + 28px + var(--install-h, 0px));
+}
 .welcome h1 { font-size: 36px; margin: 26px 0 12px; }
 .welcome .points { list-style: none; padding: 0; margin: 18px 0 0; }
 .welcome .points li { display: flex; gap: 12px; padding: 10px 0; }

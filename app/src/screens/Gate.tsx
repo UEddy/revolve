@@ -5,6 +5,7 @@ import { useVault } from "../state/vault.tsx";
 import { Shield, Key, Eye, Lock } from "../components/icons.tsx";
 import { Spinner, Wordmark, errorText } from "../components/bits.tsx";
 import { passkeysAvailable } from "../lib/passkey.ts";
+import { InstallBanner } from "../components/InstallBanner.tsx";
 
 function useAction() {
   const [busy, setBusy] = useState(false);
@@ -62,8 +63,7 @@ export function Welcome() {
         <li><Shield /><span><b>Your payment stays shielded.</b> ZEC never leaves the private pool on the way in.</span></li>
         <li><Eye /><span><b>Every buy gets a fresh wallet.</b> Its key is sealed on this phone, so positions cannot be tied to each other or to you.</span></li>
       </ul>
-      <div style={{ flex: 1, minHeight: 24 }} />
-      <div className="stack">
+      <div className="stack" style={{ marginTop: 28 }}>
         {!supported && <p className="err">Open Revolve over https in Chrome on Android or Safari on iPhone to create a passkey.</p>}
         {error && <p className="err">{error}</p>}
         <button className="btn" disabled={!supported || busy} onClick={() => run(create)}>
@@ -72,26 +72,33 @@ export function Welcome() {
         <RestoreButton run={run} />
         <p className="faint center">Your keys never leave this phone. Revolve has no servers that know who you are.</p>
       </div>
+      <InstallBanner inline />
     </div>
   );
 }
+
+/**
+ * Autofocus only with a mouse: on a phone a focused button on load just shows
+ * a focus ring nobody asked for, and there is no keyboard to press Enter.
+ */
+const finePointer = () => matchMedia("(hover: hover) and (pointer: fine)").matches;
 
 export function Unlock() {
   const { unlock } = useVault();
   const { busy, error, run } = useAction();
   return (
-    <div className="welcome" style={{ justifyContent: "center", textAlign: "center", alignItems: "center" }}>
+    <div className="welcome" style={{ textAlign: "center", alignItems: "center" }}>
       <Wordmark height={44} />
       <h1 style={{ fontSize: 30 }}>Welcome back</h1>
       <p className="muted" style={{ marginTop: 0 }}>Your wallets are sealed on this phone. Your passkey opens them.</p>
-      <div className="spacer" />
-      <div className="stack" style={{ width: "100%" }}>
+      <div className="stack" style={{ width: "100%", marginTop: 28 }}>
         {error && <p className="err">{error}</p>}
-        <button className="btn" disabled={busy} onClick={() => run(unlock)} autoFocus>
+        <button className="btn" disabled={busy} onClick={() => run(unlock)} autoFocus={finePointer()}>
           {busy ? <Spinner /> : <Lock />} Unlock
         </button>
         <RestoreButton run={run} />
       </div>
+      <InstallBanner inline />
     </div>
   );
 }
