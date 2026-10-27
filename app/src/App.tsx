@@ -2,6 +2,7 @@ import { VaultProvider, useVault } from "./state/vault.tsx";
 import { EngineProvider } from "./state/engine.tsx";
 import { CreditsProvider } from "./state/credits.tsx";
 import { FundScreen, FundingScreen } from "./screens/Fund.tsx";
+import { MarketScreen, NftScreen } from "./screens/Collectibles.tsx";
 import { useRoute, href } from "./router.ts";
 import { Welcome, Unlock } from "./screens/Gate.tsx";
 import { Home } from "./screens/Home.tsx";
@@ -43,6 +44,8 @@ function Screens() {
       {route.name === "settings" && <Settings />}
       {route.name === "fund" && <FundScreen />}
       {route.name === "funding" && <FundingScreen key={route.id} id={route.id} />}
+      {route.name === "market" && <MarketScreen key={route.id} id={route.id} />}
+      {route.name === "nft" && <NftScreen key={route.symbol} symbol={route.symbol} />}
       {(route.name === "home" || route.name === "discover" || route.name === "settings") && <Tabs at={route.name} />}
       </CreditsProvider>
     </EngineProvider>

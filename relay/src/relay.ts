@@ -8,12 +8,34 @@
 // once). Rate limits are global, never per client: the relay keeps no
 // state about who is asking.
 
+import { nftList, projectNft, projectPolymarket, type NftCollection, type NftEntry } from "./feeds.ts";
+
 export type RelayEnv = {
   APP_ORIGIN?: string;
   SOLANA_RPC_URL?: string;
   JUP_API_BASE?: string;
   JUP_API_KEY?: string;
+  /** Magic Eden collections for the NFT feed as `symbol:Name,symbol:Name` (defaults below). */
+  NFT_COLLECTIONS?: string;
 };
+
+// Read-only Discover feeds: one fixed upstream each, never shaped by the client.
+const POLYMARKET_EVENTS = "https://gamma-api.polymarket.com/events?active=true&closed=false&order=volume24hr&ascending=false&limit=30";
+const MAGIC_EDEN = "https://api-mainnet.magiceden.dev/v2/collections";
+/** Well-known collections. Magic Eden's ranked "popular" endpoint returns nothing, and its plain list is newest-first and unvetted. */
+export const DEFAULT_NFTS: readonly NftEntry[] = [
+  { symbol: "mad_lads", name: "Mad Lads" },
+  { symbol: "okay_bears", name: "Okay Bears" },
+  { symbol: "claynosaurz", name: "Claynosaurz" },
+  { symbol: "famous_fox_federation", name: "Famous Fox Federation" },
+  { symbol: "degods", name: "DeGods" },
+  { symbol: "solana_monkey_business", name: "Solana Monkey Business" },
+  { symbol: "smb_gen3", name: "SMB Gen3" },
+  { symbol: "tensorians", name: "Tensorians" },
+];
+const FEED_TTL = { markets: 60_000, nfts: 300_000 };
+const NFT_META_TTL = 24 * 3600_000;
+const NFT_META_RETRY = 3600_000;
 
 const DEFAULT_RPC = "https://api.mainnet-beta.solana.com";
 const DEFAULT_JUP = "https://lite-api.jup.ag";
@@ -38,7 +60,8 @@ const JUP_PATHS: { re: RegExp; method: "GET" | "POST"; cacheSeconds: number }[] 
   { re: /^ultra\/v1\/execute$/, method: "POST", cacheSeconds: 0 },
 ];
 
-const IMAGE_TYPES = /^image\/(png|jpeg|gif|webp|avif|svg\+xml)$/;
+// "image/jpg" is a common non-standard spelling of image/jpeg (some S3 uploads use it).
+const IMAGE_TYPES = /^image\/(png|jpeg|jpg|gif|webp|avif|svg\+xml)$/;
 
 // ---------- shared, user-free state: a response cache and global rate limits ----------
 
@@ -104,12 +127,18 @@ export class Bucket {
   }
 }
 
-export type RelayState = { cache: ResponseCache; limits: { rpc: Bucket; jup: Bucket; img: Bucket } };
+export type RelayState = {
+  cache: ResponseCache;
+  limits: { rpc: Bucket; jup: Bucket; img: Bucket; feeds: Bucket };
+  /** Last good body of each feed, served when its upstream fails or rate-limits. */
+  stale: Map<string, Uint8Array<ArrayBuffer>>;
+};
 
 export function newState(): RelayState {
   return {
     cache: new ResponseCache(24 * 1024 * 1024),
-    limits: { rpc: new Bucket(25, 50), jup: new Bucket(8, 20), img: new Bucket(40, 80) },
+    limits: { rpc: new Bucket(25, 50), jup: new Bucket(8, 20), img: new Bucket(40, 80), feeds: new Bucket(1, 4) },
+    stale: new Map(),
   };
 }
 
@@ -199,6 +228,65 @@ export async function handleJup(req: Request, env: RelayEnv, state: RelayState):
   return new Response(bytes, { status: upstream.status, headers: { "content-type": type, "cache-control": browserCache } });
 }
 
+async function upstreamJson(url: string): Promise<unknown> {
+  const res = await fetch(url, { headers: { accept: "application/json" }, signal: AbortSignal.timeout(15_000) });
+  if (!res.ok) throw new Error(`upstream ${res.status}`);
+  return res.json();
+}
+
+/** Collection metadata (name, image): best effort, cached a day; after a failure not retried for an hour. */
+async function nftMeta(state: RelayState, symbol: string, url: string): Promise<unknown> {
+  const key = `nft:meta:${symbol}`;
+  const hit = state.cache.get(key);
+  if (hit) return hit.body.length ? JSON.parse(new TextDecoder().decode(hit.body)) : null;
+  try {
+    const meta = (await upstreamJson(url)) as { name?: unknown; image?: unknown };
+    const keep = { name: meta?.name, image: meta?.image };
+    state.cache.set(key, { until: Date.now() + NFT_META_TTL, status: 200, type: "application/json", body: new TextEncoder().encode(JSON.stringify(keep)) });
+    return keep;
+  } catch {
+    state.cache.set(key, { until: Date.now() + NFT_META_RETRY, status: 200, type: "application/json", body: new Uint8Array(0) });
+    return null;
+  }
+}
+
+/** One cached, read-only feed. On an upstream failure the last good copy is served, marked stale. */
+async function feed(state: RelayState, key: string, ttl: number, load: () => Promise<unknown>): Promise<Response> {
+  const browserCache = "public, max-age=30";
+  const hit = state.cache.get(key);
+  if (hit) return fromCache(hit, browserCache);
+  const stale = () => {
+    const last = state.stale.get(key);
+    return last ? new Response(last, { status: 200, headers: { "content-type": "application/json", "cache-control": "public, max-age=15", "x-revolve-stale": "1" } }) : null;
+  };
+  if (!state.limits.feeds.take()) return stale() ?? busy();
+  try {
+    const body = new TextEncoder().encode(JSON.stringify({ items: await load(), at: new Date().toISOString() }));
+    state.cache.set(key, { until: Date.now() + ttl, status: 200, type: "application/json", body });
+    state.stale.set(key, body);
+    return new Response(body, { status: 200, headers: { "content-type": "application/json", "cache-control": browserCache } });
+  } catch {
+    return stale() ?? json(502, { error: "upstream failed" });
+  }
+}
+
+export function handleFeed(req: Request, env: RelayEnv, state: RelayState, which: "markets" | "nfts"): Promise<Response> | Response {
+  if (req.method !== "GET") return json(405, { error: "GET only" });
+  if (which === "markets") return feed(state, "feed:markets", FEED_TTL.markets, async () => projectPolymarket(await upstreamJson(POLYMARKET_EVENTS)));
+  return feed(state, "feed:nfts", FEED_TTL.nfts, async () => {
+    const out: NftCollection[] = [];
+    // One collection at a time, so a refresh stays far below Magic Eden's per-minute limit.
+    for (const entry of nftList(env.NFT_COLLECTIONS, DEFAULT_NFTS)) {
+      const base = `${MAGIC_EDEN}/${encodeURIComponent(entry.symbol)}`;
+      const stats = await upstreamJson(`${base}/stats`).catch(() => null);
+      const card = projectNft(entry, await nftMeta(state, entry.symbol, base), stats);
+      if (card) out.push(card);
+    }
+    if (!out.length) throw new Error("no collections");
+    return out;
+  });
+}
+
 /** True for hostnames we refuse to fetch: IP literals and local names. */
 export function blockedHost(host: string): boolean {
   const h = host.toLowerCase().replace(/^\[|\]$/g, "");
@@ -228,25 +316,28 @@ export async function handleImg(req: Request, state: RelayState): Promise<Respon
   }
   const hit = state.cache.get(src.href);
   if (hit?.status === 200) return new Response(hit.body, { status: 200, headers: { "content-type": hit.type, ...IMAGE_HEADERS } });
-  if (hit) return json(502, { error: "icon unavailable" }, { "cache-control": "public, max-age=600" });
+  if (hit) return json(502, { error: "icon unavailable" }, { "cache-control": "public, max-age=30" });
   if (!state.limits.img.take()) return busy();
-  // Dead icons (often slow IPFS gateways) are remembered for a while, so
-  // every page view does not wait on the same timeout again.
-  const fail = (error: string) => {
-    state.cache.set(src.href, { until: Date.now() + 600_000, status: 502, type: "", body: new Uint8Array(0) });
+  // Failed icons are remembered so every page view doesn't wait on the same
+  // dead host: 10 minutes when the answer was definite (not an image, too
+  // large, 4xx), 30 seconds for timeouts, network errors and 5xx, which are
+  // often just a slow moment.
+  const fail = (error: string, transient: boolean) => {
+    state.cache.set(src.href, { until: Date.now() + (transient ? 30_000 : 600_000), status: 502, type: "", body: new Uint8Array(0) });
     return json(502, { error });
   };
   let upstream: Response;
   try {
     upstream = await fetch(src, { headers: { accept: "image/*" }, redirect: "follow", signal: AbortSignal.timeout(8_000) });
   } catch {
-    return fail("fetch failed");
+    return fail("fetch failed", true);
   }
   const finalHost = new URL(upstream.url || src.href).hostname;
   const type = (upstream.headers.get("content-type") ?? "").split(";")[0]!.trim().toLowerCase();
-  if (!upstream.ok || blockedHost(finalHost) || !IMAGE_TYPES.test(type)) return fail("not an image");
+  if (upstream.status >= 500) return fail("upstream error", true);
+  if (!upstream.ok || blockedHost(finalHost) || !IMAGE_TYPES.test(type)) return fail("not an image", false);
   const bytes = new Uint8Array(await upstream.arrayBuffer());
-  if (bytes.length > MAX_IMAGE) return fail("image too large");
+  if (bytes.length > MAX_IMAGE) return fail("image too large", false);
   state.cache.set(src.href, { until: Date.now() + 6 * 3600_000, status: 200, type, body: bytes });
   return new Response(bytes, { status: 200, headers: { "content-type": type, ...IMAGE_HEADERS } });
 }
@@ -272,6 +363,8 @@ export function createRelay(env: RelayEnv, state: RelayState = newState(), prefi
         if (route === "/rpc") res = await handleRpc(req, env, state);
         else if (route === "/jup") res = await handleJup(req, env, state);
         else if (route === "/img") res = await handleImg(req, state);
+        else if (route === "/feeds/markets") res = await handleFeed(req, env, state, "markets");
+        else if (route === "/feeds/nfts") res = await handleFeed(req, env, state, "nfts");
         else if (route === "/health") res = json(200, { ok: true });
         else res = json(404, { error: "not found" });
       } catch {

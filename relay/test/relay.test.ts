@@ -1,4 +1,4 @@
-import { test } from "node:test";
+import { mock, test } from "node:test";
 import assert from "node:assert/strict";
 import { createServer } from "node:http";
 import type { AddressInfo } from "node:net";
@@ -114,6 +114,27 @@ test("over HTTP: CORS for the app origin only, client headers never forwarded", 
   } finally {
     f.restore();
     server.close();
+  }
+});
+
+test("a slow-moment failure is retried after 30 s; a definite one stays cached for 10 min", async () => {
+  mock.timers.enable({ apis: ["Date"], now: 0 });
+  const f = stubFetch((url) => new Response("x", { status: url.endsWith("/slow") ? 504 : 404 }));
+  try {
+    const s = newState();
+    const get = (p: string) => handleImg(new Request(`https://relay.test/img?u=${encodeURIComponent(`https://img.test${p}`)}`), s);
+    await get("/slow");
+    await get("/gone");
+    mock.timers.tick(31_000);
+    await get("/slow");
+    await get("/gone");
+    assert.deepEqual(f.calls.map((c) => new URL(c.url).pathname), ["/slow", "/gone", "/slow"]);
+    mock.timers.tick(600_000);
+    await get("/gone");
+    assert.equal(f.calls.length, 4);
+  } finally {
+    f.restore();
+    mock.timers.reset();
   }
 });
 

@@ -9,6 +9,7 @@ import { amount, usd, units, ago } from "../lib/format.ts";
 import type { Funding, Position } from "../lib/model.ts";
 import { useCredits } from "../state/credits.tsx";
 import { BalanceText } from "./Fund.tsx";
+import { DiscoverSection } from "../components/DiscoverSection.tsx";
 import { useEffect } from "react";
 import { href } from "../router.ts";
 import { Meter, Spinner, TokenIcon, Wordmark } from "../components/bits.tsx";
@@ -89,6 +90,8 @@ export function Home() {
           <Lock />
         </button>
       </div>
+
+      <DiscoverSection />
 
       <div className="hero">
         <div className="eyebrow">Portfolio</div>
