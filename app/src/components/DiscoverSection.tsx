@@ -1,4 +1,4 @@
-// The home screen's Discover section: category chips and one compact
+// The Discover tab's top section: category chips and one compact
 // carousel for the active category. Three cards show at a time with the
 // next one peeking in; scroll-snap per card, page dots, arrows for mice,
 // and a one-time swipe hint.
@@ -139,7 +139,7 @@ export function DiscoverSection() {
   };
 
   return (
-    <section className="dsc" aria-label="Discover">
+    <section className="dsc" aria-label="Browse by category">
       <div className="dsc-chips" role="tablist" aria-label="Category">
         {CATEGORIES.map((c) => (
           <button key={c.key} role="tab" aria-selected={cat === c.key} className="dsc-chip" onClick={() => setCat(c.key)}>

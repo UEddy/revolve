@@ -172,8 +172,8 @@ h3 { font-size: 16px; margin: 0; }
 .stat { background: var(--sunk); border-radius: 16px; padding: 12px; }
 .stat b { display: block; font: 700 17px var(--display); margin-top: 2px; }
 
-/* ---------- discover carousel (home) ---------- */
-/* Compact on purpose: about a third of a phone screen, so the portfolio stays visible below. */
+/* ---------- discover carousel (Discover tab) ---------- */
+/* Compact on purpose: about a third of a phone screen, so search and the lists stay visible below. */
 .dsc { height: clamp(250px, 34dvh, 300px); display: flex; flex-direction: column; margin: 12px 0 4px; }
 .dsc-chips {
   flex: none; display: flex; gap: 8px; overflow-x: auto; scrollbar-width: none;

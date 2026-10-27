@@ -1,4 +1,5 @@
-// Search, trending, new launches and stocks, straight from Jupiter's token data.
+// The Discover tab: the category chips and carousel on top, then search,
+// trending, new launches and stocks, straight from Jupiter's token data.
 
 import { useEffect, useState } from "react";
 import { tokens, isStock, type JupToken } from "../lib/jupiter.ts";
@@ -6,6 +7,7 @@ import { compact, pct, price, ago } from "../lib/format.ts";
 import { href } from "../router.ts";
 import { TokenIcon } from "../components/bits.tsx";
 import { Search } from "../components/icons.tsx";
+import { DiscoverSection } from "../components/DiscoverSection.tsx";
 
 type Tab = "trending" | "new" | "stocks";
 const TABS: { key: Tab; label: string }[] = [
@@ -110,6 +112,7 @@ export function Discover() {
   return (
     <div className="screen">
       <h1 style={{ marginTop: 6 }}>Discover</h1>
+      <DiscoverSection />
       <div className="search" style={{ position: "sticky" }}>
         <Search />
         <input
