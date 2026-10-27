@@ -5,6 +5,7 @@ import "@fontsource/work-sans/400.css";
 import "@fontsource/work-sans/600.css";
 import "./theme.css";
 import "./styles.css";
+import "./lib/install.ts"; // catches beforeinstallprompt before React renders
 import { App } from "./App.tsx";
 
 createRoot(document.getElementById("root")!).render(
