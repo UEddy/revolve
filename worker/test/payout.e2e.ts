@@ -21,17 +21,17 @@ const memo = `rv1|${o.order_id}|${burner}`;
 const line = (c: number) => ({ txid: "cd".repeat(32), pool: "ironwood", output_index: 0, value: 1_000_000, memo, height: 1, confirmations: c });
 
 book.onNote(line(4));
-await runPayouts(book, payer, 0n);
+await runPayouts(book, payer, { reserve: 0n, dailyCap: 10n ** 15n });
 assert.equal(book.get(o.order_id)!.status, "confirmed", "still inside the random delay");
 
 book.onNote(line(9));
-await runPayouts(book, payer, 0n);
+await runPayouts(book, payer, { reserve: 0n, dailyCap: 10n ** 15n });
 const res = book.get(o.order_id)!;
 console.log("after payout", res);
 assert.equal(res.status, "paid_out");
 const got = await payer.conn.getBalance(new PublicKey(burner));
 assert.equal(got, 30_000_000);
-await runPayouts(book, payer, 0n);
+await runPayouts(book, payer, { reserve: 0n, dailyCap: 10n ** 15n });
 book.onNote(line(10));
 assert.equal(await payer.conn.getBalance(new PublicKey(burner)), 30_000_000, "no double pay");
 console.log("burner received", got, "lamports; e2e ok");

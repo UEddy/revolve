@@ -12,6 +12,27 @@
 # client IPs are never recorded. The client IP is also not forwarded upstream.
 
 revolveapp.duckdns.org {
+	# Every response: HTTPS only, no sniffing, no framing, no referrer, no
+	# powerful features, and nothing that names the server software. The
+	# worker and relay only ever answer JSON or images, so a CSP of 'none'
+	# costs nothing and stops any response from running as a page.
+	header {
+		Strict-Transport-Security "max-age=63072000; includeSubDomains"
+		X-Content-Type-Options "nosniff"
+		Referrer-Policy "no-referrer"
+		Content-Security-Policy "default-src 'none'; frame-ancestors 'none'; base-uri 'none'; form-action 'none'"
+		X-Frame-Options "DENY"
+		Permissions-Policy "camera=(), microphone=(), geolocation=(), payment=(), usb=(), browsing-topics=()"
+		Cross-Origin-Resource-Policy "cross-origin"
+		-Server
+		-Via
+	}
+
+	# The worker takes at most 128 KB (credit spends), the relay 64 KB.
+	request_body {
+		max_size 256KB
+	}
+
 	@worker path /orders /orders/* /limits /buckets /mint/*
 	handle @worker {
 		reverse_proxy 127.0.0.1:8787 {

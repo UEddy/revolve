@@ -130,6 +130,8 @@ export function zatToZec(zat: bigint): string {
 
 const noteKey = (n: NoteLine) => `${n.txid}:${n.pool}:${n.output_index}`;
 const hash = (s: string) => createHash("sha256").update(s).digest("hex");
+/** The stats key of a UTC day's payout total, e.g. paid_lamports_2026-10-27. */
+export const dayKey = (ms: number) => `paid_lamports_${new Date(ms).toISOString().slice(0, 10)}`;
 
 export class OrderBook {
   readonly funds: FundBook;
@@ -314,6 +316,18 @@ export class OrderBook {
     }
   }
 
+  /** Lamports paid out so far today (UTC), settled payouts only. */
+  paidToday(): bigint {
+    const day = this.db.prepare("SELECT n FROM stats WHERE key = ?").get(dayKey(this.now())) as { n: number } | undefined;
+    return BigInt(day?.n ?? 0);
+  }
+
+  /** Paid today plus everything in flight: what a new payout is checked against. */
+  paidOrPayingToday(): bigint {
+    const paying = this.db.prepare("SELECT payout_lamports FROM orders WHERE status = 'paying'").all() as { payout_lamports: string }[];
+    return this.paidToday() + paying.reduce((s, r) => s + BigInt(r.payout_lamports), 0n);
+  }
+
   inFlight(): InFlightPayout[] {
     const rows = this.db.prepare("SELECT * FROM orders WHERE status = 'paying'").all() as unknown as OrderRow[];
     return rows.map((r) => ({
@@ -355,6 +369,10 @@ export class OrderBook {
       this.db.prepare("DELETE FROM orders WHERE order_id = ?").run(orderId);
       this.bump("paid_out");
       this.bump(`paid_out_zat_${row.bucket_zat}`);
+      // One total per UTC day, nothing per order: enough to enforce the daily cap.
+      this.db
+        .prepare("INSERT INTO stats VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET n = n + excluded.n")
+        .run(dayKey(this.now()), Number(row.payout_lamports));
       this.db.exec("COMMIT");
     } catch (e) {
       this.db.exec("ROLLBACK");

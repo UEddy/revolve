@@ -28,6 +28,33 @@ export interface ServerDeps {
   freeInventory: () => bigint | null;
   /** The credits mint, or null when no mint key is configured (the /mint routes then answer 503). */
   mint: Mint | null;
+  /** Global request budgets (tests pass their own). */
+  limits?: { write: Bucket; read: Bucket };
+}
+
+/**
+ * Token bucket shared by every client: the worker keeps no state about who is
+ * asking, so the limits are global. Over budget a route answers 503 busy,
+ * which the app already backs off from.
+ */
+export class Bucket {
+  private tokens: number;
+  private last = Date.now();
+  private readonly perSecond: number;
+  private readonly burst: number;
+  constructor(perSecond: number, burst: number) {
+    this.perSecond = perSecond;
+    this.burst = burst;
+    this.tokens = burst;
+  }
+  take(): boolean {
+    const now = Date.now();
+    this.tokens = Math.min(this.burst, this.tokens + ((now - this.last) / 1000) * this.perSecond);
+    this.last = now;
+    if (this.tokens < 1) return false;
+    this.tokens -= 1;
+    return true;
+  }
 }
 
 const MAX_BODY = 1024;
@@ -36,11 +63,17 @@ const MAX_TOKEN_BODY = 128 * 1024;
 
 // Deliberately no request logging: no IPs, user agents or timings are recorded.
 export function createApi(deps: ServerDeps) {
-  return createServer(async (req, res) => {
+  // Creating orders and fundings, signing and spending: a few per second is far
+  // above real use. Reads include each open order's status polling.
+  const limits = deps.limits ?? { write: new Bucket(3, 12), read: new Bucket(30, 60) };
+  const server = createServer(async (req, res) => {
     res.setHeader("Access-Control-Allow-Origin", deps.appOrigin);
     res.setHeader("Vary", "Origin");
     res.setHeader("Cache-Control", "no-store");
     res.setHeader("Referrer-Policy", "no-referrer");
+    // JSON only: never sniffed as anything else, never rendered as a page.
+    res.setHeader("X-Content-Type-Options", "nosniff");
+    res.setHeader("Content-Security-Policy", "default-src 'none'; frame-ancestors 'none'");
 
     try {
       const path = new URL(req.url ?? "/", "http://x").pathname;
@@ -49,6 +82,10 @@ export function createApi(deps: ServerDeps) {
         res.setHeader("Access-Control-Allow-Headers", "Content-Type");
         res.setHeader("Access-Control-Max-Age", "600");
         return send(res, 204);
+      }
+      if (!(req.method === "POST" ? limits.write : limits.read).take()) {
+        res.setHeader("Retry-After", "1");
+        return send(res, 503, { error: "busy" });
       }
       if (req.method === "GET" && path === "/limits") return getLimits(res, deps);
       if (req.method === "GET" && path === "/buckets") return getBuckets(res, deps);
@@ -73,6 +110,12 @@ export function createApi(deps: ServerDeps) {
       send(res, 500, { error: "internal" });
     }
   });
+  // Slow clients can't hold connections open: every body here is small.
+  server.requestTimeout = 15_000;
+  server.headersTimeout = 10_000;
+  server.keepAliveTimeout = 5_000;
+  server.maxHeadersCount = 50;
+  return server;
 }
 
 /** An amount is available when there is a price and the hot wallet can cover its payout. */
