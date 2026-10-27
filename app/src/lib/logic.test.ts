@@ -10,7 +10,7 @@ const pos = (id: string, o: Partial<Position> = {}): Position => ({
   createdAt: Date.parse("2026-10-26T12:00:00Z"),
   burner: { pub: `pub-${id}`, seed: "" },
   token: token(),
-  order: { id: "rv_aaaaaaaa", bucketZec: "0.01", amountZec: "0.01", depositUa: "u1", payoutLamports: "1", quoteExpiresAt: "", status: "paid_out", confirmations: 3 },
+  order: { id: "rv_aaaaaaaa", amountZec: "0.01", depositUa: "u1", payoutLamports: "1", quoteExpiresAt: "", status: "paid_out", confirmations: 3 },
   stage: "held",
   sends: [],
   ...o,

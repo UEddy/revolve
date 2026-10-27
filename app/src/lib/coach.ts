@@ -3,6 +3,7 @@
 // warning before they happen. Heuristics, stated plainly: the coach warns,
 // it cannot prevent.
 
+import type { Limits } from "./amount.ts";
 import type { Position, TokenRef } from "./model.ts";
 
 export type Level = "low" | "medium" | "high";
@@ -74,6 +75,21 @@ export function buyWarnings(token: TokenRef, positions: Position[], now: number)
     w.push({ level: "low", title: "Another order is in flight", body: "Paying two orders at the same moment lets someone pair them by timing. Spacing them out helps." });
   }
   return w;
+}
+
+/**
+ * A gentle note when the amount is close to the most Revolve can pay out
+ * right now. Payouts are public, and the largest ones are the rarest, so
+ * they have the fewest lookalikes. Only when the max leaves real room
+ * (5x the minimum); otherwise every amount would look "large".
+ */
+export function amountNote(zats: bigint, limits: Limits): Warning | null {
+  if (limits.max < limits.min * 5n || zats * 10n < limits.max * 7n) return null;
+  return {
+    level: "low",
+    title: "A larger amount than most",
+    body: "Bigger payouts are rarer, so fewer look like yours. A smaller amount, or a few buys spread over time, blends in better.",
+  };
 }
 
 export function sendWarnings(from: Position, to: string, all: Position[]): Warning[] {

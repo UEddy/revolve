@@ -36,7 +36,8 @@ export type Position = {
   token: TokenRef;
   order: {
     id: string;
-    bucketZec: string;
+    /** Fixed bucket of pre-v1.2 orders; amountZec is the order amount. */
+    bucketZec?: string;
     amountZec: string;
     depositUa: string;
     payoutLamports: string;

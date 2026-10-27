@@ -5,7 +5,7 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { useVault } from "./vault.tsx";
 import { newBurner } from "../lib/burner.ts";
-import { MOCK, SOL_MINT, SWAP_RESERVE_LAMPORTS, type Bucket } from "../lib/config.ts";
+import { MOCK, SOL_MINT, SWAP_RESERVE_LAMPORTS } from "../lib/config.ts";
 import { buildMemo, zip321 } from "../lib/memo.ts";
 import { createOrder, getOrder, type OrderState } from "../lib/orders.ts";
 import { ultraOrder, usdPrice } from "../lib/jupiter.ts";
@@ -23,7 +23,7 @@ const RETRY_MS = 15_000;
 type Engine = {
   prices: Record<string, number>;
   busy: Record<string, string>;
-  startOrder(token: TokenRef, bucket: Bucket): Promise<string>;
+  startOrder(token: TokenRef, amountZec: string): Promise<string>;
   retrySwap(id: string): void;
   sell(id: string): Promise<void>;
   refresh(id: string): void;
@@ -97,9 +97,9 @@ export function EngineProvider({ children }: { children: ReactNode }) {
 
   // ---- buy: burner first, then the order, both sealed before the link exists ----
   const startOrder = useCallback(
-    async (token: TokenRef, bucket: Bucket) => {
+    async (token: TokenRef, amountZec: string) => {
       const burner = newBurner();
-      const quote = await createOrder(bucket);
+      const quote = await createOrder(amountZec);
       paymentLink({ burner, order: { id: quote.order_id, depositUa: quote.deposit_ua, amountZec: quote.amount_zec } } as Position);
       const id = Array.from(random(8), (b) => b.toString(16).padStart(2, "0")).join("");
       const pos: Position = {
@@ -109,7 +109,6 @@ export function EngineProvider({ children }: { children: ReactNode }) {
         token,
         order: {
           id: quote.order_id,
-          bucketZec: bucket,
           amountZec: quote.amount_zec,
           depositUa: quote.deposit_ua,
           payoutLamports: quote.payout_lamports,
