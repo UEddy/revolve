@@ -15,6 +15,9 @@ export interface Config {
   swapFeeLamports: bigint;
   quoteTtlSecs: number;
   maxOpenOrders: number;
+  /** PKCS#8 PEM of the credits mint key, outside the repo; empty disables /mint. */
+  mintKeyPath: string;
+  mintKeyId: string;
 }
 
 export function loadConfig(): Config {
@@ -37,6 +40,8 @@ export function loadConfig(): Config {
     swapFeeLamports: BigInt(opt("SWAP_FEE_LAMPORTS", "5000000")),
     quoteTtlSecs: Number(opt("QUOTE_TTL_SECS", "900")),
     maxOpenOrders: Number(opt("MAX_OPEN_ORDERS", "20")),
+    mintKeyPath: opt("MINT_KEY_PATH", ""),
+    mintKeyId: opt("MINT_KEY_ID", "k1"),
   };
 }
 

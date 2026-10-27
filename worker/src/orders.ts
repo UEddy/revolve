@@ -1,6 +1,7 @@
 import { createHash, randomBytes, randomInt } from "node:crypto";
 import type { DatabaseSync } from "node:sqlite";
 import { PublicKey } from "@solana/web3.js";
+import { FundBook, parseFundMemo } from "./funds.ts";
 
 /** Deprecated fixed buckets, still served by GET /buckets (API_CONTRACT.md v1.2), in zatoshis. */
 export const BUCKETS: Record<string, bigint> = {
@@ -14,6 +15,8 @@ export const MIN_ZAT = 200_000n;
 export const STEP_ZAT = 100_000n;
 
 export const REQUIRED_CONFS = 3;
+/** Token orders are already backed, so they pay after a random delay instead of confirmations. */
+const TOKEN_PAY_DELAY_SECS: [number, number] = [60, 300];
 const PAID_CACHE_MS = 15 * 60 * 1000;
 
 /** One line from the watcher (solver/src/notes.rs). */
@@ -50,7 +53,13 @@ interface OrderRow {
   pay_at_confs: number | null;
   payout_signature: string | null;
   payout_valid_until: number | null;
+  pay_after: number | null;
+  spend_key: string | null;
 }
+
+export type SpendResult =
+  | { kind: "created" | "retried"; orderId: string; payoutLamports: bigint }
+  | { kind: "token_spent" | "amount_unavailable" | "busy" | "no_price" };
 
 export interface DuePayout {
   orderId: string;
@@ -123,6 +132,7 @@ const noteKey = (n: NoteLine) => `${n.txid}:${n.pool}:${n.output_index}`;
 const hash = (s: string) => createHash("sha256").update(s).digest("hex");
 
 export class OrderBook {
+  readonly funds: FundBook;
   private readonly db: DatabaseSync;
   private readonly now: () => number;
   /** order_id -> payout signature, memory only, for a short while after payout. */
@@ -131,6 +141,7 @@ export class OrderBook {
   constructor(db: DatabaseSync, now: () => number = Date.now) {
     this.db = db;
     this.now = now;
+    this.funds = new FundBook(db, now);
   }
 
   openCount(): number {
@@ -184,6 +195,7 @@ export class OrderBook {
     this.db
       .prepare("UPDATE orders SET status = 'expired' WHERE status = 'awaiting_payment' AND expires_at <= ?")
       .run(Math.floor(this.now() / 1000));
+    this.funds.expire();
     for (const [id, p] of this.paid) if (p.until <= this.now()) this.paid.delete(id);
   }
 
@@ -195,6 +207,14 @@ export class OrderBook {
     const existing = this.db.prepare("SELECT * FROM orders WHERE note_key = ?").get(key) as OrderRow | undefined;
     if (existing) {
       this.updateConfs(existing, n.confirmations);
+      return;
+    }
+    if (this.funds.onKnownNote(key, n)) return;
+
+    const fund = parseFundMemo(n.memo);
+    if (fund) {
+      const review = this.funds.onNote(key, n, fund.fundId);
+      if (review) this.reviewNote(key, n, review);
       return;
     }
 
@@ -227,12 +247,71 @@ export class OrderBook {
     if (!reason) this.updateConfs(this.row(order.order_id)!, n.confirmations);
   }
 
-  /** Orders past their confirmations plus random 2-6 block delay. */
+  /** Orders past their confirmations plus random 2-6 block delay, or token orders past their payout time. */
   due(): DuePayout[] {
     const rows = this.db
-      .prepare("SELECT * FROM orders WHERE status = 'confirmed' AND confirmations >= pay_at_confs")
-      .all() as unknown as OrderRow[];
+      .prepare(
+        "SELECT * FROM orders WHERE status = 'confirmed' AND (confirmations >= pay_at_confs OR pay_after <= ?)",
+      )
+      .all(Math.floor(this.now() / 1000)) as unknown as OrderRow[];
     return rows.map((r) => ({ orderId: r.order_id, burner: r.burner!, lamports: BigInt(r.payout_lamports) }));
+  }
+
+  /**
+   * Spends credit tokens for an order, in one transaction: an exact retry of an
+   * earlier spend (same `spendKey`) returns that order; otherwise any spent token,
+   * the open-order cap, a missing price or a short inventory (`fits` false, checked
+   * inside the transaction so open orders are counted) aborts with nothing marked
+   * spent. On success every token
+   * hash is recorded and a confirmed order is created that pays `burner` after a
+   * random 60-300 s delay. Signatures must already be verified.
+   */
+  spendTokens(p: {
+    tokenHashes: string[];
+    spendKey: string;
+    amountZat: bigint;
+    burner: string;
+    maxOpen: number;
+    quote: () => bigint | null;
+    fits: (lamports: bigint) => boolean;
+  }): SpendResult {
+    this.db.exec("BEGIN IMMEDIATE");
+    try {
+      const prior = this.db.prepare("SELECT order_id, payout_lamports FROM orders WHERE spend_key = ?").get(p.spendKey) as
+        | { order_id: string; payout_lamports: string }
+        | undefined;
+      if (prior) {
+        this.db.exec("COMMIT");
+        return { kind: "retried", orderId: prior.order_id, payoutLamports: BigInt(prior.payout_lamports) };
+      }
+      const isSpent = this.db.prepare("SELECT 1 FROM spent_tokens WHERE token_hash = ?");
+      if (p.tokenHashes.some((h) => isSpent.get(h))) {
+        this.db.exec("ROLLBACK");
+        return { kind: "token_spent" };
+      }
+      const fail = (kind: "busy" | "no_price" | "amount_unavailable"): SpendResult => {
+        this.db.exec("ROLLBACK");
+        return { kind };
+      };
+      if (this.openCount() >= p.maxOpen) return fail("busy");
+      const payout = p.quote();
+      if (payout === null) return fail("no_price");
+      if (!p.fits(payout)) return fail("amount_unavailable");
+      const markSpent = this.db.prepare("INSERT INTO spent_tokens (token_hash) VALUES (?)");
+      for (const h of p.tokenHashes) markSpent.run(h);
+      const orderId = newOrderId();
+      const payAfter = Math.floor(this.now() / 1000) + randomInt(TOKEN_PAY_DELAY_SECS[0], TOKEN_PAY_DELAY_SECS[1] + 1);
+      this.db
+        .prepare(
+          "INSERT INTO orders (order_id, bucket_zat, payout_lamports, expires_at, status, burner, pay_after, spend_key) VALUES (?, ?, ?, 0, 'confirmed', ?, ?, ?)",
+        )
+        .run(orderId, Number(p.amountZat), payout.toString(), p.burner, payAfter, p.spendKey);
+      this.db.exec("COMMIT");
+      return { kind: "created", orderId, payoutLamports: payout };
+    } catch (e) {
+      if (this.db.isTransaction) this.db.exec("ROLLBACK");
+      throw e;
+    }
   }
 
   inFlight(): InFlightPayout[] {

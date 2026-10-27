@@ -1,0 +1,146 @@
+import { randomBytes } from "node:crypto";
+import type { DatabaseSync } from "node:sqlite";
+import { CREDIT_ZAT } from "./mint.ts";
+import { REQUIRED_CONFS, type NoteLine } from "./orders.ts";
+
+// Credit fundings (CREDITS_CONTRACT.md v1.3). A funding is matched like an order,
+// on memo fund_id and exact amount, and becomes `funded` at 3 confirmations. Its
+// row never holds the blinded messages, only that it was `minted`.
+
+/** Custody cap per funding, in zatoshis. */
+export const FUND_MAX_ZAT = 5_000_000n;
+
+export type FundStatus = "awaiting_payment" | "seen" | "funded" | "minted" | "expired" | "needs_review";
+
+interface FundRow {
+  fund_id: string;
+  amount_zat: number;
+  expires_at: number;
+  status: FundStatus;
+  note_key: string | null;
+  confirmations: number;
+  review_reason: string | null;
+}
+
+// Same alphabet as order ids: lowercase Crockford base32.
+const ALPHABET = "0123456789abcdefghjkmnpqrstvwxyz";
+const FUND_ID_RE = /^rf_[0-9a-hjkmnp-tv-z]{10}$/;
+
+export function newFundId(): string {
+  let id = "rf_";
+  for (const b of randomBytes(10)) id += ALPHABET[b & 31];
+  return id;
+}
+
+export function isFundId(s: string): boolean {
+  return FUND_ID_RE.test(s);
+}
+
+/** Memo format: `rv1f|<fund_id>`. Returns the fund id, or null if this is not a funding memo. */
+export function parseFundMemo(memo: string | null): { fundId: string | null } | null {
+  if (memo === null) return null;
+  const parts = memo.replace(/\0+$/, "").trim().split("|");
+  if (parts[0] !== "rv1f") return null;
+  return { fundId: parts.length === 2 && isFundId(parts[1]) ? parts[1] : null };
+}
+
+export class FundBook {
+  private readonly db: DatabaseSync;
+  private readonly now: () => number;
+
+  constructor(db: DatabaseSync, now: () => number) {
+    this.db = db;
+    this.now = now;
+  }
+
+  /** Fundings still waiting for a deposit to arrive or confirm. */
+  openCount(): number {
+    const r = this.db
+      .prepare("SELECT COUNT(*) AS n FROM fund_orders WHERE status IN ('awaiting_payment','seen')")
+      .get() as { n: number };
+    return r.n;
+  }
+
+  create(amountZat: bigint, ttlSecs: number) {
+    const fundId = newFundId();
+    const expiresAt = Math.floor(this.now() / 1000) + ttlSecs;
+    this.db
+      .prepare("INSERT INTO fund_orders (fund_id, amount_zat, expires_at, status) VALUES (?, ?, ?, 'awaiting_payment')")
+      .run(fundId, Number(amountZat), expiresAt);
+    return {
+      fund_id: fundId,
+      credits: Number(amountZat / CREDIT_ZAT),
+      expires_at: new Date(expiresAt * 1000).toISOString().replace(/\.\d{3}Z$/, "Z"),
+    };
+  }
+
+  get(fundId: string): { status: FundStatus; confirmations: number } | null {
+    const r = this.row(fundId);
+    return r ? { status: r.status, confirmations: r.confirmations } : null;
+  }
+
+  /** Credits a funded funding may have signed, or null if it is not `funded`. */
+  signableCredits(fundId: string): number | null {
+    const r = this.row(fundId);
+    return r?.status === "funded" ? Number(BigInt(r.amount_zat) / CREDIT_ZAT) : null;
+  }
+
+  /** Moves funded -> minted. False if it was not `funded` (already minted, or never funded). */
+  claimMinted(fundId: string): boolean {
+    const r = this.db
+      .prepare("UPDATE fund_orders SET status = 'minted' WHERE fund_id = ? AND status = 'funded'")
+      .run(fundId);
+    return Number(r.changes) === 1;
+  }
+
+  expire(): void {
+    this.db
+      .prepare("UPDATE fund_orders SET status = 'expired' WHERE status = 'awaiting_payment' AND expires_at <= ?")
+      .run(Math.floor(this.now() / 1000));
+  }
+
+  /** True if this note already belongs to a funding (its confirmations were updated). */
+  onKnownNote(key: string, n: NoteLine): boolean {
+    const row = this.db.prepare("SELECT * FROM fund_orders WHERE note_key = ?").get(key) as FundRow | undefined;
+    if (!row) return false;
+    this.updateConfs(row, n.confirmations);
+    return true;
+  }
+
+  /**
+   * Applies a new note carrying a funding memo, with the same review rules as
+   * orders. Returns a review-note reason when the note matches no open funding.
+   */
+  onNote(key: string, n: NoteLine, fundId: string | null): string | null {
+    if (fundId === null) return "malformed_memo";
+    const fund = this.row(fundId);
+    if (!fund) return "unknown_fund";
+    if (fund.status !== "awaiting_payment" && fund.status !== "expired") return "duplicate_payment";
+
+    let reason: string | null = null;
+    if (fund.status === "expired") reason = "paid_after_expiry";
+    else if (BigInt(n.value) !== BigInt(fund.amount_zat)) reason = "wrong_amount";
+
+    this.db
+      .prepare("UPDATE fund_orders SET status = ?, note_key = ?, confirmations = ?, review_reason = ? WHERE fund_id = ?")
+      .run(reason ? "needs_review" : "seen", key, n.confirmations, reason, fundId);
+    if (!reason) this.updateConfs(this.row(fundId)!, n.confirmations);
+    return null;
+  }
+
+  reviewFunds(): { fund_id: string; amount_zat: number; note_key: string | null; review_reason: string | null }[] {
+    return this.db
+      .prepare("SELECT fund_id, amount_zat, note_key, review_reason FROM fund_orders WHERE status = 'needs_review'")
+      .all() as never;
+  }
+
+  private updateConfs(row: FundRow, confs: number): void {
+    let status = row.status;
+    if (status === "seen" && confs >= REQUIRED_CONFS) status = "funded";
+    this.db.prepare("UPDATE fund_orders SET confirmations = ?, status = ? WHERE fund_id = ?").run(confs, status, row.fund_id);
+  }
+
+  private row(fundId: string): FundRow | undefined {
+    return this.db.prepare("SELECT * FROM fund_orders WHERE fund_id = ?").get(fundId) as FundRow | undefined;
+  }
+}

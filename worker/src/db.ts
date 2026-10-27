@@ -17,7 +17,9 @@ CREATE TABLE IF NOT EXISTS orders (
   pay_at_confs INTEGER,
   payout_signature TEXT,
   payout_valid_until INTEGER,
-  review_reason TEXT
+  review_reason TEXT,
+  pay_after INTEGER,
+  spend_key TEXT
 );
 -- Notes already turned into a payout, stored only as a hash so a re-emitted
 -- watcher line is ignored without remembering which order it paid.
@@ -30,6 +32,18 @@ CREATE TABLE IF NOT EXISTS review_notes (
   confirmations INTEGER NOT NULL DEFAULT 0
 );
 CREATE TABLE IF NOT EXISTS stats (key TEXT PRIMARY KEY, n INTEGER NOT NULL);
+-- Credit fundings (CREDITS_CONTRACT.md). Never holds blinded messages.
+CREATE TABLE IF NOT EXISTS fund_orders (
+  fund_id TEXT PRIMARY KEY,
+  amount_zat INTEGER NOT NULL,
+  expires_at INTEGER NOT NULL,
+  status TEXT NOT NULL,
+  note_key TEXT UNIQUE,
+  confirmations INTEGER NOT NULL DEFAULT 0,
+  review_reason TEXT
+);
+-- SHA-256 of every spent token message, kept forever against double spends.
+CREATE TABLE IF NOT EXISTS spent_tokens (token_hash TEXT PRIMARY KEY);
 `;
 
 export function openDb(path: string): DatabaseSync {
@@ -43,5 +57,11 @@ export function openDb(path: string): DatabaseSync {
   if (!reviewCols.some((c) => c.name === "confirmations")) {
     db.exec("ALTER TABLE review_notes ADD COLUMN confirmations INTEGER NOT NULL DEFAULT 0");
   }
+  // Token orders (v1.3): a payout time instead of confirmations, and the hash of
+  // the spending request so an exact retry finds its order. Both go with the row.
+  const orderCols = db.prepare("PRAGMA table_info(orders)").all() as { name: string }[];
+  if (!orderCols.some((c) => c.name === "pay_after")) db.exec("ALTER TABLE orders ADD COLUMN pay_after INTEGER");
+  if (!orderCols.some((c) => c.name === "spend_key")) db.exec("ALTER TABLE orders ADD COLUMN spend_key TEXT");
+  db.exec("CREATE UNIQUE INDEX IF NOT EXISTS orders_spend_key ON orders (spend_key)");
   return db;
 }
