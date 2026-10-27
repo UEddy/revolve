@@ -20,6 +20,7 @@ interface FundRow {
   note_key: string | null;
   confirmations: number;
   review_reason: string | null;
+  blinded_hash: string | null;
 }
 
 // Same alphabet as order ids: lowercase Crockford base32.
@@ -79,17 +80,20 @@ export class FundBook {
     return r ? { status: r.status, confirmations: r.confirmations } : null;
   }
 
-  /** Credits a funded funding may have signed, or null if it is not `funded`. */
-  signableCredits(fundId: string): number | null {
+  /** What /sign needs: status, the number of credits, and the hash of the set signed when minted. */
+  signState(fundId: string): { status: FundStatus; credits: number; blindedHash: string | null } | null {
     const r = this.row(fundId);
-    return r?.status === "funded" ? Number(BigInt(r.amount_zat) / CREDIT_ZAT) : null;
+    return r ? { status: r.status, credits: Number(BigInt(r.amount_zat) / CREDIT_ZAT), blindedHash: r.blinded_hash } : null;
   }
 
-  /** Moves funded -> minted. False if it was not `funded` (already minted, or never funded). */
-  claimMinted(fundId: string): boolean {
+  /**
+   * Moves funded -> minted, recording the hash of the signed blinded set. False if
+   * it was not `funded` (already minted, or never funded).
+   */
+  claimMinted(fundId: string, blindedHash: string): boolean {
     const r = this.db
-      .prepare("UPDATE fund_orders SET status = 'minted' WHERE fund_id = ? AND status = 'funded'")
-      .run(fundId);
+      .prepare("UPDATE fund_orders SET status = 'minted', blinded_hash = ? WHERE fund_id = ? AND status = 'funded'")
+      .run(blindedHash, fundId);
     return Number(r.changes) === 1;
   }
 

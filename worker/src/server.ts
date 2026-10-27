@@ -238,34 +238,48 @@ async function postFund(req: IncomingMessage, res: ServerResponse, deps: ServerD
 
 /**
  * Signs exactly `credits` blinded messages for a funded funding, then moves it to
- * `minted`. The status change is a single conditional update after signing, so of
- * two concurrent calls only one gets signatures; the other's are discarded. The
- * blinded messages are never stored or logged.
+ * `minted` with the SHA-256 of the canonical (sorted) blinded set. The status
+ * change is a single conditional update after signing. A retry with the same set,
+ * in any order, is signed again (RSA blind signing is deterministic, so the
+ * signatures are identical) and answered 200; any other set gets 409. The blinded
+ * messages themselves are never stored or logged.
  */
 async function postSign(req: IncomingMessage, res: ServerResponse, deps: ServerDeps, fundId: string) {
   const mint = deps.mint;
   if (mint === null) return send(res, 503, { error: "mint_unavailable" });
-  const fund = deps.book.funds.get(fundId);
-  if (!fund) return send(res, 404, { error: "not_found" });
-  const credits = deps.book.funds.signableCredits(fundId);
-  if (credits === null) return send(res, 409, { error: fund.status === "minted" ? "already_minted" : "not_funded" });
+  const state = deps.book.funds.signState(fundId);
+  if (!state) return send(res, 404, { error: "not_found" });
+  if (state.status !== "funded" && state.status !== "minted") return send(res, 409, { error: "not_funded" });
 
   const body = await readJson(req, MAX_TOKEN_BODY);
   if (body === null) return send(res, 400, { error: "invalid_json" });
   const raw = body.blinded;
-  if (!Array.isArray(raw) || raw.length !== credits) return send(res, 400, { error: "invalid_blinded" });
-  const blinded = raw.map(b64);
+  const decoded = Array.isArray(raw) && raw.length === state.credits ? raw.map(b64) : null;
+  const blinded = decoded?.every((b) => b !== null) ? (decoded as Buffer[]) : null;
+  const setHash = blinded && blindedSetHash(blinded);
+
+  if (state.status === "minted") {
+    if (setHash === null || setHash !== state.blindedHash) return send(res, 409, { error: "already_minted" });
+    return send(res, 200, { signatures: blinded!.map((b) => mint.blindSign(b).toString("base64")) });
+  }
+
+  if (blinded === null || setHash === null) return send(res, 400, { error: "invalid_blinded" });
   let signatures: string[];
   try {
-    signatures = blinded.map((b) => {
-      if (b === null) throw new Error("not base64");
-      return mint.blindSign(b).toString("base64");
-    });
+    signatures = blinded.map((b) => mint.blindSign(b).toString("base64"));
   } catch {
     return send(res, 400, { error: "invalid_blinded" });
   }
-  if (!deps.book.funds.claimMinted(fundId)) return send(res, 409, { error: "already_minted" });
+  if (!deps.book.funds.claimMinted(fundId, setHash)) {
+    // A concurrent call minted first; the same set still gets its signatures.
+    if (deps.book.funds.signState(fundId)?.blindedHash !== setHash) return send(res, 409, { error: "already_minted" });
+  }
   send(res, 200, { signatures });
+}
+
+/** SHA-256 over the blinded messages sorted bytewise; all have the modulus length, so concatenation is unambiguous. */
+function blindedSetHash(blinded: Buffer[]): string {
+  return sha256(Buffer.concat([...blinded].sort(Buffer.compare)));
 }
 
 const sha256 = (b: Buffer) => createHash("sha256").update(b).digest("hex");
