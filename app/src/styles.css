@@ -309,7 +309,7 @@ body:has(.sheet) .install { display: none; }
 /* The wordmark sits in the upper third (its top about 18.5% down, under 22% even below the demo strip), the rest follows it. */
 .welcome {
   display: flex; flex-direction: column; min-height: 100dvh;
-  padding: calc(env(safe-area-inset-top, 0px) + clamp(40px, 18.5dvh, 220px)) 22px calc(env(safe-area-inset-bottom, 0px) + 28px + var(--install-h, 0px));
+  padding: calc(env(safe-area-inset-top, 0px) + clamp(40px, 18.5dvh, 220px)) 22px calc(env(safe-area-inset-bottom, 0px) + 28px);
 }
 .welcome h1 { font-size: 36px; margin: 26px 0 12px; }
 .welcome .points { list-style: none; padding: 0; margin: 18px 0 0; }
