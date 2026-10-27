@@ -3,7 +3,9 @@
 import { useEffect, useState, type ReactNode } from "react";
 import { iconUrl } from "../lib/jupiter.ts";
 import type { Level, Warning } from "../lib/coach.ts";
-import { Back } from "./icons.tsx";
+import { Back, Mark } from "./icons.tsx";
+import wordmarkLight from "../assets/brand/revolve-wordmark-light.svg";
+import wordmarkDark from "../assets/brand/revolve-wordmark-dark.svg";
 import { back } from "../router.ts";
 
 export function TokenIcon({ src, symbol, large }: { src?: string; symbol: string; large?: boolean }) {
@@ -79,8 +81,23 @@ export function TopBar({ title, right, noBack }: { title?: ReactNode; right?: Re
   );
 }
 
+/** The wordmark, light or dark to match the system theme. */
+export function Wordmark({ height }: { height: number }) {
+  return (
+    <picture className="wordmark">
+      <source srcSet={wordmarkDark} media="(prefers-color-scheme: dark)" />
+      <img src={wordmarkLight} alt="Revolve" height={height} width={Math.round((height * 552) / 134)} />
+    </picture>
+  );
+}
+
+/** Busy indicator: the mark, turning slowly. */
 export function Spinner() {
-  return <span className="spin" aria-label="Working" />;
+  return (
+    <span className="spin" role="status" aria-label="Working">
+      <Mark />
+    </span>
+  );
 }
 
 export function errorText(e: unknown): string {

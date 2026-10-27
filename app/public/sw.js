@@ -2,7 +2,7 @@
 // they load and kept; the page itself is network-first so a deploy shows
 // up on the next open. /api is never cached: it is live and per request.
 
-const CACHE = "revolve-shell-v1";
+const CACHE = "revolve-shell-v2"; // bump when files under /icons/ change: they are served cache-first
 
 self.addEventListener("install", (e) => {
   e.waitUntil(caches.open(CACHE).then((c) => c.addAll(["/", "/manifest.webmanifest", "/icons/icon.svg"])).then(() => self.skipWaiting()));

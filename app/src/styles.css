@@ -223,14 +223,26 @@ h3 { font-size: 16px; margin: 0; }
 .welcome .points { list-style: none; padding: 0; margin: 18px 0 0; }
 .welcome .points li { display: flex; gap: 12px; padding: 10px 0; }
 .welcome .points svg { width: 22px; height: 22px; color: var(--accent-mark); flex: none; margin-top: 1px; }
-.mark { width: 64px; height: 64px; }
 .err { color: var(--danger); font-size: 14px; }
 .center { text-align: center; }
 .empty { text-align: center; padding: 34px 10px; color: var(--muted); }
 .kv { display: flex; justify-content: space-between; gap: 12px; padding: 8px 0; }
 .kv + .kv { border-top: 1px solid var(--line); }
 .kv span:first-child { color: var(--muted); }
-.spin { width: 18px; height: 18px; border-radius: 999px; border: 2.5px solid currentColor; border-right-color: transparent; animation: spin 700ms linear infinite; }
+/* brand: wordmark and mark (colours from theme tokens) */
+.wordmark { display: inline-flex; }
+.wordmark img { display: block; height: auto; max-width: 100%; }
+.mark-ring { stroke: var(--ink); }
+.mark-orbit { stroke: var(--accent-mark); }
+.mark-dot { fill: var(--accent-mark); }
+/* On a filled button the mark takes the button's text colour so it stays visible. */
+.btn .mark-ring, .btn .mark-orbit { stroke: currentColor; }
+.btn .mark-dot { fill: currentColor; }
+.btn .mark-orbit, .btn .mark-dot { opacity: 0.75; }
+
+/* busy indicator: the whole mark turning slowly */
+.spin { display: inline-flex; width: 20px; height: 20px; flex: none; }
+.spin .mark { width: 100%; height: 100%; animation: spin 2.4s linear infinite; }
 @keyframes spin { to { transform: rotate(360deg); } }
 details summary { cursor: pointer; font-weight: 600; }
 
