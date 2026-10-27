@@ -10,3 +10,19 @@ target/
 dist/
 .DS_Store
 data/
+
+# Demo video (video/): rendered output and media never enter the repo.
+# Media lives in ~/revolve-media, reached through the video/public/media symlink.
+video/out/
+video/public/media
+video/src/generated/
+*.mp4
+*.mov
+*.m4v
+*.webm
+*.mkv
+*.mp3
+*.wav
+*.m4a
+*.aac
+*.flac
