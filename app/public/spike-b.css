@@ -1,12 +1,12 @@
   /* Same values as src/theme.css; this page is standalone (no build), so it keeps its own copy. */
   :root {
     --bg: #ffffff; --ink: #0a0a0a; --muted: #4a5160; --card: #ffffff; --line: #e2e4e9;
-    --primary: #1e3a8a; --on-primary: #ffffff; --ok: #1e3a8a; --bad: #b42318; --chip: #f2f3f5;
+    --primary: #f4b728; --on-primary: #0a0a0a; --ok: #8a5f00; --bad: #b42318; --chip: #f2f3f5;
     color-scheme: light dark;
   }
   @media (prefers-color-scheme: dark) {
     :root { --bg: #000000; --ink: #ffffff; --muted: #b4b9c4; --card: #0e0f12; --line: #2b2e36;
-      --ok: #ffffff; --bad: #f87171; --chip: #1a1c21; }
+      --ok: #f4b728; --bad: #f87171; --chip: #1a1c21; }
   }
   * { box-sizing: border-box; }
   body { margin: 0; background: var(--bg); color: var(--ink); font: 15px/1.45 system-ui, sans-serif; }
