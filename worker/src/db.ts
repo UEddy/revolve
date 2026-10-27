@@ -32,7 +32,8 @@ CREATE TABLE IF NOT EXISTS review_notes (
   confirmations INTEGER NOT NULL DEFAULT 0
 );
 CREATE TABLE IF NOT EXISTS stats (key TEXT PRIMARY KEY, n INTEGER NOT NULL);
--- Credit fundings (CREDITS_CONTRACT.md). Never holds blinded messages.
+-- Credit fundings (CREDITS_CONTRACT.md). Never holds blinded messages, only the
+-- SHA-256 of the signed set so an identical retry of /sign gets its signatures.
 CREATE TABLE IF NOT EXISTS fund_orders (
   fund_id TEXT PRIMARY KEY,
   amount_zat INTEGER NOT NULL,
@@ -40,7 +41,8 @@ CREATE TABLE IF NOT EXISTS fund_orders (
   status TEXT NOT NULL,
   note_key TEXT UNIQUE,
   confirmations INTEGER NOT NULL DEFAULT 0,
-  review_reason TEXT
+  review_reason TEXT,
+  blinded_hash TEXT
 );
 -- SHA-256 of every spent token message, kept forever against double spends.
 CREATE TABLE IF NOT EXISTS spent_tokens (token_hash TEXT PRIMARY KEY);
@@ -63,5 +65,7 @@ export function openDb(path: string): DatabaseSync {
   if (!orderCols.some((c) => c.name === "pay_after")) db.exec("ALTER TABLE orders ADD COLUMN pay_after INTEGER");
   if (!orderCols.some((c) => c.name === "spend_key")) db.exec("ALTER TABLE orders ADD COLUMN spend_key TEXT");
   db.exec("CREATE UNIQUE INDEX IF NOT EXISTS orders_spend_key ON orders (spend_key)");
+  const fundCols = db.prepare("PRAGMA table_info(fund_orders)").all() as { name: string }[];
+  if (!fundCols.some((c) => c.name === "blinded_hash")) db.exec("ALTER TABLE fund_orders ADD COLUMN blinded_hash TEXT");
   return db;
 }

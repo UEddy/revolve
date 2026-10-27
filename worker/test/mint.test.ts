@@ -153,7 +153,7 @@ test("GET /mint/key, and 503 for every mint route without a key", async () => {
   );
 });
 
-test("fund, confirm, sign once: a second sign call is 409 and signatures finalize", () =>
+test("fund, confirm, sign once: signatures finalize; a different second set is 409", () =>
   withMintApi(async ({ base, book }) => {
     for (const bad of ["0.051", "0.0015", "0.001", "abc", 0.003]) {
       const r = await json(base, "/mint/orders", { amount_zec: bad });
@@ -194,7 +194,8 @@ test("fund, confirm, sign once: a second sign call is 409 and signatures finaliz
     for (const t of await b.finish(signatures)) assert.ok(await mint.verify(b64(t.msg)!, b64(t.sig)!));
     assert.equal(await status(), "minted");
 
-    const again = await json(base, `/mint/orders/${id}/sign`, { blinded: b.blinded });
+    const other = await blindTokens(3);
+    const again = await json(base, `/mint/orders/${id}/sign`, { blinded: other.blinded });
     assert.equal(again.status, 409);
     assert.deepEqual(await again.json(), { error: "already_minted" });
 
@@ -202,12 +203,64 @@ test("fund, confirm, sign once: a second sign call is 409 and signatures finaliz
     assert.equal((await json(base, "/mint/orders/rf_0000000000/sign", { blinded: [] })).status, 404);
   }));
 
-test("concurrent sign calls: exactly one gets signatures", () =>
+test("sign retry with the identical blinded set returns the same signatures; any other set is 409", () =>
+  withMintApi(async ({ base, book, db }) => {
+    const id = ((await (await json(base, "/mint/orders", { amount_zec: "0.003" })).json()) as { fund_id: string }).fund_id;
+    book.onNote(note(`rv1f|${id}`, 300_000, 3));
+    const b = await blindTokens(3);
+    const sign = async (blinded: unknown) => {
+      const r = await json(base, `/mint/orders/${id}/sign`, { blinded });
+      return { status: r.status, body: (await r.json()) as { signatures?: string[]; error?: string } };
+    };
+
+    const first = await sign(b.blinded);
+    assert.equal(first.status, 200);
+    const sigs = first.body.signatures!;
+
+    assert.deepEqual(await sign(b.blinded), first, "identical retry");
+    const reordered = await sign([b.blinded[2], b.blinded[0], b.blinded[1]]);
+    assert.equal(reordered.status, 200);
+    assert.deepEqual(reordered.body.signatures, [sigs[2], sigs[0], sigs[1]], "same set in another order, signatures follow it");
+    for (const t of await b.finish(sigs)) assert.ok(await mint.verify(b64(t.msg)!, b64(t.sig)!));
+
+    const other = await blindTokens(1);
+    for (const set of [
+      [b.blinded[0], b.blinded[1], other.blinded[0]],
+      b.blinded.slice(0, 2),
+      [...b.blinded, other.blinded[0]],
+      [b.blinded[0], b.blinded[0], b.blinded[1]],
+      [b.blinded[0], b.blinded[1], "!!"],
+      "x",
+    ]) {
+      assert.deepEqual(await sign(set), { status: 409, body: { error: "already_minted" } }, JSON.stringify(set).slice(0, 60));
+    }
+
+    // Only the hash of the set is kept, never the blinded messages.
+    const row = db.prepare("SELECT * FROM fund_orders WHERE fund_id = ?").get(id) as Record<string, unknown>;
+    assert.equal(row.status, "minted");
+    assert.match(row.blinded_hash as string, /^[0-9a-f]{64}$/);
+    const stored = JSON.stringify(db.prepare("SELECT * FROM fund_orders").all());
+    for (const x of b.blinded) assert.ok(!stored.includes(x) && !stored.includes(b64(x)!.toString("hex")));
+  }));
+
+test("concurrent sign calls: identical sets all get the signatures, different sets only one", () =>
   withMintApi(async ({ base, book }) => {
-    const id = ((await (await json(base, "/mint/orders", { amount_zec: "0.002" })).json()) as { fund_id: string }).fund_id;
-    book.onNote(note(`rv1f|${id}`, 200_000, 3));
+    const fund = async () => {
+      const id = ((await (await json(base, "/mint/orders", { amount_zec: "0.002" })).json()) as { fund_id: string }).fund_id;
+      book.onNote(note(`rv1f|${id}`, 200_000, 3, Buffer.from(id.padEnd(32, "x")).toString("hex")));
+      return id;
+    };
+    const same = await fund();
     const b = await blindTokens(2);
-    const codes = (await Promise.all([1, 2, 3].map(() => json(base, `/mint/orders/${id}/sign`, { blinded: b.blinded })))).map(
+    const res = await Promise.all([1, 2, 3].map(() => json(base, `/mint/orders/${same}/sign`, { blinded: b.blinded })));
+    assert.deepEqual(res.map((r) => r.status), [200, 200, 200]);
+    const bodies = await Promise.all(res.map((r) => r.json()));
+    assert.deepEqual(bodies[1], bodies[0]);
+    assert.deepEqual(bodies[2], bodies[0]);
+
+    const diff = await fund();
+    const sets = await Promise.all([1, 2, 3].map(() => blindTokens(2)));
+    const codes = (await Promise.all(sets.map((s) => json(base, `/mint/orders/${diff}/sign`, { blinded: s.blinded })))).map(
       (r) => r.status,
     );
     assert.deepEqual(codes.sort(), [200, 409, 409]);
