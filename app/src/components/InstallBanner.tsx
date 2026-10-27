@@ -2,9 +2,9 @@
 // dialog behind our Install button, or Share instructions on iOS. Only
 // rendered on the welcome, unlock and tab screens (never over a payment or
 // buy flow); hidden by CSS while a sheet is open.
-// - inline (welcome, unlock): the last thing in the page's flow, pushed to
-//   the bottom of the screen when there is room, so it can never cover the
-//   Create or Unlock button, however short the phone.
+// - inline (welcome, unlock): in the page's flow, in the gap between the
+//   wordmark and the title, so it can never cover the Create or Unlock
+//   button, however short the phone.
 // - floating (tab screens): fixed above the tab bar; it reports its height
 //   as --install-h so the screen pads its bottom by that much.
 
