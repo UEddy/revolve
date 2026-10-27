@@ -1,0 +1,151 @@
+// Read-only market feeds for Discover: Polymarket events and Magic Eden NFT
+// collections. Each feed is one fixed upstream URL (nothing from the client
+// reaches the query), projected down to the few fields the app shows, and
+// cached, so phones download kilobytes instead of the upstream's megabytes
+// and the upstream sees the relay, rarely, instead of every phone.
+
+export type Outcome = { name: string; p: number };
+
+export type MarketEvent = {
+  id: string;
+  title: string;
+  image?: string;
+  volume24h: number;
+  endDate?: string;
+  /** Open outcomes, most likely first (at most 6). */
+  outcomes: Outcome[];
+};
+
+type RawMarket = {
+  question?: string;
+  groupItemTitle?: string;
+  outcomes?: string;
+  outcomePrices?: string;
+  active?: boolean;
+  closed?: boolean;
+};
+type RawEvent = {
+  id?: string | number;
+  title?: string;
+  image?: string;
+  icon?: string;
+  volume24hr?: number;
+  endDate?: string;
+  negRisk?: boolean;
+  markets?: RawMarket[];
+};
+
+const https = (u: unknown): string | undefined => (typeof u === "string" && u.startsWith("https://") ? u : undefined);
+
+function parseList(s: unknown): unknown[] {
+  if (typeof s !== "string") return [];
+  try {
+    const v: unknown = JSON.parse(s);
+    return Array.isArray(v) ? v : [];
+  } catch {
+    return [];
+  }
+}
+
+const prob = (v: unknown): number | null => {
+  const n = Number(v);
+  return Number.isFinite(n) && n >= 0 && n <= 1 ? n : null;
+};
+
+/**
+ * Polymarket Gamma `/events` to MarketEvent[].
+ * - Multi-outcome events (negRisk): one Yes/No market per outcome; the
+ *   outcome's chance is its Yes price. When the open outcomes add up to
+ *   less than half, the event is effectively decided and is skipped.
+ * - Ladders (every open market has its own label, e.g. price levels): each
+ *   level with its Yes price.
+ * - Otherwise the event's main market names its outcomes (e.g. two teams).
+ */
+export function projectPolymarket(body: unknown, max = 12): MarketEvent[] {
+  if (!Array.isArray(body)) return [];
+  const out: MarketEvent[] = [];
+  const byYes = (ms: RawMarket[]): Outcome[] =>
+    ms.flatMap((m) => {
+      const p = prob(parseList(m.outcomePrices)[0]);
+      const name = m.groupItemTitle || m.question;
+      return p === null || !name ? [] : [{ name, p }];
+    });
+  for (const e of body as RawEvent[]) {
+    const open = (e.markets ?? []).filter((m) => m.active !== false && m.closed !== true);
+    if (!open.length || !e.title || e.id === undefined) continue;
+    let outcomes: Outcome[];
+    if (e.negRisk) {
+      outcomes = byYes(open);
+      if (outcomes.reduce((s, o) => s + o.p, 0) < 0.5) continue;
+    } else if (open.length > 1 && open.every((m) => m.groupItemTitle)) {
+      outcomes = byYes(open);
+    } else {
+      const m = open[0]!;
+      const names = parseList(m.outcomes);
+      const prices = parseList(m.outcomePrices);
+      outcomes = names.flatMap((n, i) => {
+        const p = prob(prices[i]);
+        return typeof n === "string" && p !== null ? [{ name: n, p }] : [];
+      });
+    }
+    if (!outcomes.length) continue;
+    outcomes.sort((a, b) => b.p - a.p);
+    out.push({
+      id: String(e.id),
+      title: e.title,
+      image: https(e.image) ?? https(e.icon),
+      volume24h: Number(e.volume24hr) || 0,
+      endDate: typeof e.endDate === "string" ? e.endDate : undefined,
+      outcomes: outcomes.slice(0, 6),
+    });
+    if (out.length >= max) break;
+  }
+  return out;
+}
+
+export type NftCollection = {
+  symbol: string;
+  name: string;
+  image?: string;
+  /** Floor price in lamports (the app shows it in USD). */
+  floor: string | null;
+  listed: number | null;
+  volume7d: string | null;
+};
+
+const SYMBOL = /^[a-z0-9_-]{1,64}$/;
+
+export type NftEntry = { symbol: string; name: string };
+
+/** `symbol:Name,symbol:Name` from the environment, or the defaults. Bad symbols are dropped. */
+export function nftList(env: string | undefined, fallback: readonly NftEntry[]): NftEntry[] {
+  const parsed = (env ?? "")
+    .split(",")
+    .map((s) => s.trim())
+    .filter(Boolean)
+    .map((s) => {
+      const [symbol = "", ...name] = s.split(":");
+      return { symbol: symbol.trim(), name: name.join(":").trim() || symbol.trim() };
+    });
+  return (parsed.length ? parsed : [...fallback]).filter((e) => SYMBOL.test(e.symbol)).slice(0, 16);
+}
+
+/**
+ * Magic Eden `/stats` (+ optional `/v2/collections/:symbol` metadata, which
+ * is far more rate-limited) to one card. Null when the stats are unusable.
+ */
+export function projectNft(entry: NftEntry, meta: unknown, stats: unknown): NftCollection | null {
+  const m = (meta ?? {}) as { name?: unknown; image?: unknown };
+  const s = (stats ?? {}) as { floorPrice?: unknown; listedCount?: unknown; volume7d?: unknown };
+  const lamports = (v: unknown) => (typeof v === "number" && Number.isFinite(v) && v >= 0 ? BigInt(Math.round(v)).toString() : null);
+  const floor = lamports(s.floorPrice);
+  if (floor === null) return null;
+  return {
+    symbol: entry.symbol,
+    name: typeof m.name === "string" && m.name ? m.name : entry.name,
+    image: https(m.image),
+    floor,
+    listed: typeof s.listedCount === "number" ? s.listedCount : null,
+    volume7d: lamports(s.volume7d),
+  };
+}

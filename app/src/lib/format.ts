@@ -13,6 +13,24 @@ export function price(n: number | undefined): string {
   return `$${sig(n, 3)}`;
 }
 
+const SUBSCRIPT = "₀₁₂₃₄₅₆₇₈₉";
+
+/**
+ * A price short enough for a narrow card. Below $0.001 the run of zeros
+ * after the point is written as a subscript count: $0.000625 is $0.0₃625.
+ */
+export function shortPrice(n: number | undefined): string {
+  if (n === undefined || !Number.isFinite(n)) return "–";
+  if (n <= 0 || n >= 0.001) return price(n);
+  // 0.000625 -> "6.25e-4": three zeros after the point, then 625.
+  const [mantissa = "0", exp = "0"] = n.toExponential(2).split("e");
+  const zeros = -Number(exp) - 1;
+  if (zeros < 3) return price(n); // rounded up to 0.001 or more
+  const digits = mantissa.replace(".", "").replace(/0+$/, "") || "0";
+  const count = String(zeros).split("").map((d) => SUBSCRIPT[Number(d)]).join("");
+  return `$0.0${count}${digits}`;
+}
+
 function sig(n: number, digits: number): string {
   if (n === 0) return "0";
   const s = n.toPrecision(digits);

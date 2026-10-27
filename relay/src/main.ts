@@ -21,6 +21,7 @@ const server = createServer(
       SOLANA_RPC_URL: process.env.SOLANA_RPC_URL,
       JUP_API_BASE: process.env.JUP_API_BASE,
       JUP_API_KEY: process.env.JUP_API_KEY,
+      NFT_COLLECTIONS: process.env.NFT_COLLECTIONS,
     }),
   ),
 );
