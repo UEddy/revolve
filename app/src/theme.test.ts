@@ -36,6 +36,7 @@ const PAIRS: [string, string, number][] = [
   ["banner-ink", "banner-bg", 4.5],
   ...["bg", "surface", "sunk"].map((bg): [string, string, number] => ["accent-mark", bg, 3]),
   ...SURFACES.map((bg): [string, string, number] => ["caution-mark", bg, 3]), // warning dots
+  ["qr-ink", "qr-paper", 15], // payment QR: scanners want the strongest contrast
 ];
 
 for (const [mode, t] of [["light", light], ["dark", dark]] as const) {

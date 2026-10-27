@@ -276,6 +276,16 @@ h3 { font-size: 16px; margin: 0; }
 .steps .todo .label { color: var(--faint); }
 @keyframes pulse { 50% { transform: scale(0.6); opacity: 0.5; } }
 
+/* ---------- payment card: QR and copyable fields ---------- */
+.payqr { margin: 18px auto 14px; width: min(100%, 280px); aspect-ratio: 1; padding: 0; border-radius: 14px; overflow: hidden; }
+.payqr svg { display: block; width: 100%; height: 100%; }
+.payqr-paper { fill: var(--qr-paper); }
+.payqr-ink { fill: var(--qr-ink); }
+.payfield { padding: 10px 0; border-top: 1px solid var(--line); }
+.payfield-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.payfield-label { font-size: 13px; font-weight: 600; color: var(--muted); }
+.payfield-value { margin: 6px 0 0; font-size: 13px; line-height: 1.45; }
+
 /* ---------- cash out to Zcash ---------- */
 .howto { margin: 4px 0 6px; padding-left: 20px; }
 .howto li { margin: 0 0 6px; }

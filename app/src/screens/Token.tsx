@@ -198,7 +198,7 @@ function BuySheet({ open, onClose, t }: { open: boolean; onClose: () => void; t:
       )}
       <div style={{ height: 8 }} />
       <button className="btn ghost" onClick={() => run("zodl")} disabled={busy !== null || zats === null}>
-        {busy === "zodl" ? <Spinner /> : null} Pay with Zodl instead
+        {busy === "zodl" ? <Spinner /> : null} Pay from your Zcash wallet instead
       </button>
       <p className="faint center">Buying with credits asks for your passkey first. A small part of the payout stays in the wallet to cover fees and a later sale.</p>
     </Sheet>
