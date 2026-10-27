@@ -1,0 +1,79 @@
+/* Revolve colour tokens: the only place a colour value is written.
+   White and black with navy as the single accent; a muted red and amber
+   for errors and the privacy coach's warnings.
+
+   Rules (checked by src/theme.test.ts):
+   - every text token passes WCAG AA (4.5:1) on every surface it sits on;
+   - --accent is a fill behind --on-accent text, never a text colour. In dark
+     mode navy on black is about 2:1, so links there are white, and the
+     non-text marks (meter, focus ring, selected border) use --accent-mark,
+     a lighter navy that keeps 3:1 against the dark surfaces.
+   index.html (theme-color) and public/manifest.webmanifest must repeat
+   --bg as literal values; keep them in step. */
+
+:root {
+  /* surfaces */
+  --bg: #ffffff;
+  --surface: #ffffff;
+  --sunk: #f2f3f5;
+  --line: #e2e4e9;
+  --accent-tint: #eef2fb;
+
+  /* text */
+  --ink: #0a0a0a;
+  --muted: #4a5160;
+  --faint: #5f6673;
+  --link: #1e3a8a;
+
+  /* navy accent */
+  --accent: #1e3a8a;
+  --accent-press: #172e6e;
+  --on-accent: #ffffff;
+  --accent-mark: #1e3a8a;
+
+  /* errors and warnings */
+  --danger: #b42318;
+  --danger-fill: #b42318;
+  --on-danger: #ffffff;
+  --caution: #8a4b08;
+  --caution-mark: #b45309;
+  --banner-bg: #fbbf24;
+  --banner-ink: #0a0a0a;
+
+  /* depth */
+  --scrim: rgb(0 0 0 / 0.4);
+  --shadow: 0 1px 2px rgb(0 0 0 / 0.05), 0 8px 24px rgb(0 0 0 / 0.07);
+
+  color-scheme: light dark;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #000000;
+    --surface: #0e0f12;
+    --sunk: #1a1c21;
+    --line: #2b2e36;
+    --accent-tint: #121a33;
+
+    --ink: #ffffff;
+    --muted: #b4b9c4;
+    --faint: #9aa0ac;
+    --link: #ffffff;
+
+    --accent: #1e3a8a;
+    --accent-press: #172e6e;
+    --on-accent: #ffffff;
+    --accent-mark: #6b8ae6;
+
+    --danger: #f87171;
+    --danger-fill: #b42318;
+    --on-danger: #ffffff;
+    --caution: #fbbf24;
+    --caution-mark: #f59e0b;
+    --banner-bg: #fbbf24;
+    --banner-ink: #0a0a0a;
+
+    --scrim: rgb(0 0 0 / 0.7);
+    --shadow: 0 1px 2px rgb(0 0 0 / 0.5), 0 8px 24px rgb(0 0 0 / 0.6);
+  }
+}
