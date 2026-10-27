@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { CATEGORIES, feeds, interleave, nftId, nftSource, nftUsd, pageAt, type NftCollection } from "./discover.ts";
+import { CATEGORIES, feeds, interleave, nftId, nftSource, nftSourceUrl, nftUsd, pageAt, type NftCollection } from "./discover.ts";
 import { ETH_MINT, SOL_MINT } from "./config.ts";
 import { shortPrice } from "./format.ts";
 
@@ -79,4 +79,11 @@ test("the NFT category loads all three chain feeds; one failing leaves the other
   } finally {
     globalThis.fetch = real;
   }
+});
+
+test("each collection links to its marketplace page, as the APIs' terms ask", () => {
+  assert.equal(nftSourceUrl(nft({ symbol: "mad_lads" })), "https://magiceden.io/marketplace/mad_lads");
+  assert.equal(nftSourceUrl(nft({ symbol: "cryptopunks", chain: "ethereum" })), "https://opensea.io/collection/cryptopunks");
+  assert.equal(nftSourceUrl(nft({ symbol: "stonkbrokers-434284142", chain: "robinhood" })), "https://opensea.io/collection/stonkbrokers-434284142");
+  assert.equal(nftSourceUrl(nft({ symbol: "a/b?c", chain: "ethereum" })), "https://opensea.io/collection/a%2Fb%3Fc");
 });

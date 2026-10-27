@@ -42,6 +42,15 @@ export const nftChain = (n: NftCollection): NftChain => n.chain ?? "solana";
 /** The card and route id: a slug is only unique within its chain. */
 export const nftId = (n: NftCollection) => `${nftChain(n)}:${n.symbol}`;
 export const nftSource = (n: NftCollection) => (nftChain(n) === "solana" ? "Magic Eden" : "OpenSea");
+/**
+ * The collection's page on the marketplace its numbers come from: both
+ * OpenSea's and Magic Eden's API terms ask for attribution, a link where
+ * the data is shown. Slugs come from the relay's fixed lists.
+ */
+export function nftSourceUrl(n: NftCollection): string {
+  const slug = encodeURIComponent(n.symbol);
+  return nftChain(n) === "solana" ? `https://magiceden.io/marketplace/${slug}` : `https://opensea.io/collection/${slug}`;
+}
 
 /** A feed amount in USD, or null until the price it needs is known. */
 export function nftUsd(amount: string | null, unit: NftUnit | undefined, prices: Record<string, number>): number | null {

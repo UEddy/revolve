@@ -4,7 +4,7 @@
 
 import { useEffect, useState } from "react";
 import { cardCache } from "../components/DiscoverSection.tsx";
-import { CHAIN_LABEL, feeds, nftChain, nftId, nftSource, nftUsd, type MarketEvent, type NftCollection } from "../lib/discover.ts";
+import { CHAIN_LABEL, feeds, nftChain, nftId, nftSource, nftSourceUrl, nftUsd, type MarketEvent, type NftCollection } from "../lib/discover.ts";
 import { ETH_MINT, SOL_MINT } from "../lib/config.ts";
 import { compact, usd } from "../lib/format.ts";
 import { useEngine } from "../state/engine.tsx";
@@ -75,7 +75,10 @@ export function MarketScreen({ id }: { id: string }) {
       <div className="card flat small">
         <div className="kv"><span>Traded in 24h</span><span className="num">${compact(m.volume24h)}</span></div>
         {m.endDate && <div className="kv"><span>Ends</span><span>{new Date(m.endDate).toLocaleDateString()}</span></div>}
-        <div className="kv"><span>Source</span><span>Polymarket</span></div>
+        <div className="kv">
+          <span>Source</span>
+          <a href="https://polymarket.com" target="_blank" rel="noopener noreferrer" referrerPolicy="no-referrer">Polymarket</a>
+        </div>
       </div>
     </div>
   );
@@ -121,7 +124,13 @@ export function NftScreen({ symbol: id }: { symbol: string }) {
         )}
         <div className="stat"><span className="faint">Traded in 7 days</span><b className="num">{asUsd(n.volume7d, n.volumeUnit)}</b></div>
       </div>
-      <p className="faint" style={{ marginTop: 14 }}>Prices from {nftSource(n)}.</p>
+      <p className="faint" style={{ marginTop: 14 }}>
+        Prices from{" "}
+        <a href={nftSourceUrl(n)} target="_blank" rel="noopener noreferrer" referrerPolicy="no-referrer">
+          {nftSource(n)}
+        </a>
+        .
+      </p>
     </div>
   );
 }
