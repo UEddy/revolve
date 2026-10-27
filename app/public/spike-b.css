@@ -1,11 +1,12 @@
+  /* Same values as src/theme.css; this page is standalone (no build), so it keeps its own copy. */
   :root {
-    --bg: #faf1e4; --ink: #3a2317; --muted: #6e5243; --card: #fffbf5; --line: #ead6bd;
-    --primary: #a5451f; --ok: #245c5a; --bad: #b3261e; --chip: #f6e6d2;
+    --bg: #ffffff; --ink: #0a0a0a; --muted: #4a5160; --card: #ffffff; --line: #e2e4e9;
+    --primary: #1e3a8a; --on-primary: #ffffff; --ok: #1e3a8a; --bad: #b42318; --chip: #f2f3f5;
     color-scheme: light dark;
   }
   @media (prefers-color-scheme: dark) {
-    :root { --bg: #1c1310; --ink: #f5e9da; --muted: #cdb7a5; --card: #2a1d17; --line: #4a372b;
-      --primary: #b4532a; --ok: #6cc2bb; --bad: #ff8a80; --chip: #3b2a20; }
+    :root { --bg: #000000; --ink: #ffffff; --muted: #b4b9c4; --card: #0e0f12; --line: #2b2e36;
+      --ok: #ffffff; --bad: #f87171; --chip: #1a1c21; }
   }
   * { box-sizing: border-box; }
   body { margin: 0; background: var(--bg); color: var(--ink); font: 15px/1.45 system-ui, sans-serif; }
@@ -15,7 +16,7 @@
   p.lead { color: var(--muted); margin: 0 0 20px; }
   section { background: var(--card); border: 1px solid var(--line); border-radius: 18px; padding: 16px; margin-bottom: 16px; }
   button, a.btn { display: block; width: 100%; text-align: center; font: 600 15px system-ui, sans-serif; padding: 13px 14px;
-    border-radius: 999px; border: 0; background: var(--primary); color: #fff; text-decoration: none; margin: 8px 0; cursor: pointer; }
+    border-radius: 999px; border: 0; background: var(--primary); color: var(--on-primary); text-decoration: none; margin: 8px 0; cursor: pointer; }
   button.ghost, a.ghost { background: var(--chip); color: var(--ink); }
   label { display: block; font-size: 13px; color: var(--muted); margin: 10px 0 4px; }
   input, textarea { width: 100%; font: 14px ui-monospace, monospace; padding: 10px; border-radius: 10px; border: 1px solid var(--line);

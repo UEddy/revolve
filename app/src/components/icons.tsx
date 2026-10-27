@@ -20,9 +20,9 @@ export const Spark = (p: P) => (<svg {...base} {...p}><path d="M12 3v4M12 17v4M3
 /** The Revolve mark: a ring with one body in orbit around a shielded core. */
 export const Mark = (p: P) => (
   <svg viewBox="0 0 64 64" {...p}>
-    <circle cx="32" cy="32" r="30" fill="var(--clay)" />
-    <path d="M32 12a20 20 0 1 1-17.3 10" fill="none" stroke="var(--bg)" strokeWidth="5" strokeLinecap="round" />
-    <circle cx="22" cy="14.7" r="3.4" fill="var(--saffron)" />
-    <path d="M32 22 24 25v6c0 5 3.4 8.6 8 10 4.6-1.4 8-5 8-10v-6z" fill="var(--saffron)" />
+    <circle cx="32" cy="32" r="30" fill="var(--accent)" />
+    <path d="M32 12a20 20 0 1 1-17.3 10" fill="none" stroke="var(--on-accent)" strokeWidth="5" strokeLinecap="round" />
+    <circle cx="22" cy="14.7" r="3.4" fill="var(--on-accent)" />
+    <path d="M32 22 24 25v6c0 5 3.4 8.6 8 10 4.6-1.4 8-5 8-10v-6z" fill="var(--on-accent)" />
   </svg>
 );
