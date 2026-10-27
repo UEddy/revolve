@@ -16,7 +16,7 @@ Layout on the droplet, all owned by the `revolve` system user:
 ```
 
 The watcher has no unit of its own: the worker starts it as a child process.
-Public routes: `/orders`, `/orders/<id>`, `/buckets` go to the worker; `/relay/*`
+Public routes: `/orders`, `/orders/<id>`, `/limits`, `/buckets` go to the worker; `/relay/*`
 goes to the relay with the prefix stripped; everything else returns 404. Build the
 app with `VITE_ORDER_API=https://revolveapp.duckdns.org` and
 `VITE_RELAY_URL=https://revolveapp.duckdns.org/relay`.
@@ -123,7 +123,8 @@ journalctl -u caddy --since "2 min ago" | grep -iE 'certificate obtained|error' 
 
 ```bash
 B=https://revolveapp.duckdns.org; O=https://<APP_ORIGIN>
-curl -s $B/buckets; echo                                                   # bucket list
+curl -s $B/limits; echo                                                    # min/max/step/indicative USD
+curl -s $B/buckets; echo                                                   # bucket list (deprecated)
 curl -s $B/relay/health; echo                                              # {"ok":true}
 curl -s -o /dev/null -w '%{http_code}\n' $B/                               # 404
 curl -s -o /dev/null -w '%{http_code}\n' $B/orders/rv_0000000000           # 404
