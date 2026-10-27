@@ -8,7 +8,9 @@ export type Route =
   | { name: "discover" }
   | { name: "token"; mint: string }
   | { name: "position"; id: string }
-  | { name: "settings" };
+  | { name: "settings" }
+  | { name: "fund" }
+  | { name: "funding"; id: string };
 
 export function parse(hash: string): Route {
   const [, a, b] = hash.replace(/^#/, "").split("/");
@@ -16,6 +18,8 @@ export function parse(hash: string): Route {
   if (a === "t" && b) return { name: "token", mint: decodeURIComponent(b) };
   if (a === "p" && b) return { name: "position", id: b };
   if (a === "settings") return { name: "settings" };
+  if (a === "fund" && b) return { name: "funding", id: b };
+  if (a === "fund") return { name: "fund" };
   return { name: "home" };
 }
 
@@ -25,6 +29,8 @@ export const href = {
   token: (mint: string) => `#/t/${encodeURIComponent(mint)}`,
   position: (id: string) => `#/p/${id}`,
   settings: "#/settings",
+  fund: "#/fund",
+  funding: (id: string) => `#/fund/${id}`,
 };
 
 export function go(to: string): void {

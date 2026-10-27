@@ -15,6 +15,7 @@
     "test": "node --test \"src/**/*.test.ts\" build-env.test.ts build-dist.test.ts"
   },
   "dependencies": {
+    "@cloudflare/blindrsa-ts": "0.4.6",
     "@fontsource/inter": "5.3.0",
     "@fontsource/work-sans": "5.3.0",
     "@noble/curves": "2.4.0",

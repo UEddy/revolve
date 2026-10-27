@@ -42,6 +42,19 @@ Settings (`.env.example`):
 - `src/lib/coach.ts`: per-position linkability score with reasons, and warnings before risky moves (launch sniping, tiny holder counts, repeat buys, sending to another of your wallets or to an address another wallet already used, exporting a key).
 - `../relay`: Solana RPC, Jupiter and token icons go through it so those providers see the relay's address, not the phone's. No logging, no client headers forwarded, allowlisted methods and paths, one JSON-RPC call per request.
 
+## Credits (CREDITS_CONTRACT.md v1.3)
+
+Fund once with shielded ZEC, then buy with a passkey tap. 1 credit = 0.001 ZEC.
+
+- Blind signatures: RFC 9474 RSABSSA-SHA384-PSS-Randomized via `@cloudflare/blindrsa-ts` 0.4.6 (pinned; Cloudflare-maintained, npm provenance, Apache-2.0, one dependency `sjcl`). The app never does blinding maths itself (`src/lib/credits.ts`).
+- Interop details for the mint (worker): a token's `msg` is the *prepared* message from `suite.prepare()`: a 32-byte random prefix plus the 32 random bytes generated on the device, 64 bytes in total. The signature verifies only over those 64 bytes, so the server verifies, and records SHA-256 of, exactly the `msg` it receives. The app imports the SPKI key as `RSA-PSS`/`SHA-384`, extractable (the library reads the modulus).
+- Key pinning: the first `GET /mint/key` is pinned in the vault. A different `key_id` or key shows both fingerprints and needs an explicit "Trust the new key" before minting.
+- Minting (`src/state/credits.tsx`): the prepared messages and blinding inverses are sealed in the vault before the blinded messages go to `/sign`; every returned signature is unblinded and verified against the pinned key; nothing is stored unless all of them verify.
+- Spending: a fresh WebAuthn assertion with `userVerification: "required"` on the vault's own passkey (the app also checks the user-verified flag in `authenticatorData`) before any token leaves the vault. Tokens are marked pending in the same sealed write that creates the position and its burner. `409 amount_unavailable` returns them; `token_spent`/`invalid_tokens` drops them for good (if an earlier try got no answer, the position stays and the balance checks pick up the payout); no answer means retry with the very same tokens, also after a reload.
+- Credits, pending spends and blinding state are part of the sealed vault, so they are in the encrypted backup.
+- Coach: warns when a spend comes within an hour of a funding, and when it uses the whole balance (more strongly when that equals the funded amount).
+- Open point for the mint: a second `/sign` returns 409, so if the first answer is lost in transit those credits can't be recovered. The app re-sends the identical blinded messages on retry; returning the stored blind signatures for an identical retry would make it safe.
+
 ## Privacy notes
 
 - Fonts are bundled; the page loads nothing from third parties. Token icons come through the relay.

@@ -13,21 +13,27 @@ import { amount, countdown, usd, units } from "../lib/format.ts";
 import type { Position } from "../lib/model.ts";
 import { Meter, Sheet, Spinner, TokenIcon, TopBar, errorText } from "../components/bits.tsx";
 import { Check } from "../components/icons.tsx";
+import { PayCard } from "../components/PayCard.tsx";
 import { href, go } from "../router.ts";
 import { SendSheet } from "./Send.tsx";
-
-function useNow(every = 1000) {
-  const [now, setNow] = useState(Date.now());
-  useEffect(() => {
-    const t = setInterval(() => setNow(Date.now()), every);
-    return () => clearInterval(t);
-  }, [every]);
-  return now;
-}
 
 type Step = { key: string; label: string; detail?: string };
 
 function steps(p: Position): { list: Step[]; at: number } {
+  if (p.paidWith === "credits") {
+    // Credits are already backed: no Zcash confirmations, just the privacy delay.
+    const list: Step[] = [
+      { key: "send", label: "Paid with credits", detail: "Sending your order (retried with the same credits if the network drops)" },
+      { key: "delay", label: "Privacy delay", detail: "A random 1 to 5 minute wait, so timing can't pair your tap with the payout" },
+      { key: "deliver", label: "Delivered to your new wallet" },
+      { key: "buy", label: `Bought ${p.token.symbol}` },
+    ];
+    let at = p.stage === "sending" ? 0 : 1;
+    if (p.order.status === "paid_out" || p.stage === "funded" || p.stage === "swapping" || p.stage === "swap_failed") at = 2;
+    if (p.stage === "swapping" || p.stage === "funded") at = 3;
+    if (p.stage === "held" || p.stage === "closed") at = 4;
+    return { list, at };
+  }
   const conf = Math.min(3, p.order.confirmations);
   const list: Step[] = [
     { key: "pay", label: "Pay from Zodl", detail: `${p.order.amountZec} ZEC, shielded` },
@@ -61,51 +67,6 @@ function Steps({ p }: { p: Position }) {
         </li>
       ))}
     </ol>
-  );
-}
-
-function PayCard({ p }: { p: Position }) {
-  const now = useNow();
-  const left = Date.parse(p.order.quoteExpiresAt) - now;
-  const [copied, setCopied] = useState(false);
-  let link = "";
-  let bad: string | null = null;
-  try {
-    link = paymentLink(p);
-  } catch (e) {
-    bad = errorText(e);
-  }
-  if (bad) return <p className="err">{bad}</p>;
-  return (
-    <div className="card">
-      <div className="eyebrow">Pay</div>
-      <div className="display" style={{ fontSize: 34, margin: "6px 0 2px" }}>{p.order.amountZec} ZEC</div>
-      <div className="faint">Quote holds for {countdown(left)}</div>
-      <div className="spacer" />
-      {MOCK ? (
-        <button className="btn" disabled>Pay with Zodl (demo: paid automatically)</button>
-      ) : (
-        <a className="btn" href={link} aria-disabled={left <= 0}>
-          Pay with Zodl
-        </a>
-      )}
-      <div style={{ height: 8 }} />
-      <button
-        className="btn ghost"
-        onClick={() =>
-          navigator.clipboard.writeText(link).then(
-            () => setCopied(true),
-            () => setCopied(false),
-          )
-        }
-      >
-        {copied ? "Copied" : "Copy payment link"}
-      </button>
-      <p className="faint" style={{ marginBottom: 0 }}>
-        Zodl opens with the amount and a private memo filled in. Just confirm. The memo tells the payout where to go and is
-        encrypted on chain.
-      </p>
-    </div>
   );
 }
 
@@ -175,7 +136,14 @@ export function PositionScreen({ id }: { id: string }) {
       ) : (
         <>
           <div className="spacer" />
-          {p.stage === "awaiting_payment" && <PayCard p={p} />}
+          {p.stage === "awaiting_payment" && (
+            <PayCard
+              amountZec={p.order.amountZec}
+              expiresAt={p.order.quoteExpiresAt}
+              link={() => paymentLink(p)}
+              memoNote="The memo tells the payout where to go and is encrypted on chain."
+            />
+          )}
           {p.stage === "expired" && (
             <div className="card flat">
               <h3>Quote expired</h3>

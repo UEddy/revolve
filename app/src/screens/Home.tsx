@@ -4,14 +4,18 @@
 import { useVault } from "../state/vault.tsx";
 import { useEngine } from "../state/engine.tsx";
 import { positionRisk } from "../lib/coach.ts";
-import { SOL_MINT } from "../lib/config.ts";
+import { SOL_MINT, ZEC_MINT } from "../lib/config.ts";
 import { amount, usd, units, ago } from "../lib/format.ts";
-import type { Position } from "../lib/model.ts";
+import type { Funding, Position } from "../lib/model.ts";
+import { useCredits } from "../state/credits.tsx";
+import { BalanceText } from "./Fund.tsx";
+import { useEffect } from "react";
 import { href } from "../router.ts";
 import { Meter, Spinner, TokenIcon, Wordmark } from "../components/bits.tsx";
-import { Lock } from "../components/icons.tsx";
+import { Lock, Mark } from "../components/icons.tsx";
 
 const PENDING_TEXT: Partial<Record<Position["stage"], string>> = {
+  sending: "Placing your order",
   awaiting_payment: "Waiting for your payment",
   settling: "Payment received, settling privately",
   funded: "Buying now",
@@ -27,9 +31,47 @@ function value(p: Position, prices: Record<string, number>): { asset: number | n
   return { asset: px === undefined ? null : held * px, cash: units(p.balance?.lamports, 9) * solPx };
 }
 
+const FUNDING_TEXT: Partial<Record<Funding["status"], string>> = {
+  awaiting_payment: "Waiting for your payment",
+  seen: "Payment received, confirming",
+  funded: "Issuing your credits",
+  needs_review: "Needs review",
+};
+
+function CreditsCard() {
+  const { balance, credits } = useCredits();
+  const open = (credits?.fundings ?? []).filter((f) => FUNDING_TEXT[f.status]);
+  return (
+    <>
+      <div className="card flat row" style={{ marginTop: 18 }}>
+        <div className="grow">
+          <div className="eyebrow">Credits</div>
+          <div style={{ marginTop: 6, fontWeight: 600 }}><BalanceText credits={balance} /></div>
+        </div>
+        <a className="btn small" href={href.fund}>Add funds</a>
+      </div>
+      {open.length > 0 && (
+        <div className="list" style={{ marginTop: 10 }}>
+          {open.map((f) => (
+            <a key={f.fundId} className="trow" href={href.funding(f.fundId)}>
+              <span className="ticon"><Mark style={{ width: 26, height: 26 }} /></span>
+              <div className="grow">
+                <div className="name">Adding {f.amountZec} ZEC</div>
+                <div className="sub">{FUNDING_TEXT[f.status]}</div>
+              </div>
+              <div className="right">{f.status === "funded" || f.status === "seen" ? <Spinner /> : null}</div>
+            </a>
+          ))}
+        </div>
+      )}
+    </>
+  );
+}
+
 export function Home() {
   const { data, lock } = useVault();
-  const { prices, busy } = useEngine();
+  const { prices, busy, priceOf } = useEngine();
+  useEffect(() => priceOf(ZEC_MINT), [priceOf]);
   const all = data?.positions ?? [];
   const holdings = all.filter((p) => p.stage === "held" || (p.stage === "closed" && BigInt(p.balance?.lamports ?? "0") > 10_000n));
   const pending = all.filter((p) => PENDING_TEXT[p.stage]);
@@ -60,6 +102,8 @@ export function Home() {
             : "Nothing here yet"}
         </div>
       </div>
+
+      <CreditsCard />
 
       {pending.length > 0 && (
         <>

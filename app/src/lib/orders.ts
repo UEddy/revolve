@@ -20,9 +20,12 @@ export type OrderState = { status: OrderStatus; confirmations?: number; payout_s
 
 export class OrderApiError extends Error {
   readonly status: number;
-  constructor(message: string, status: number) {
+  /** The server's `error` code (e.g. "token_spent"), when it sent one. */
+  readonly code: string | undefined;
+  constructor(message: string, status: number, code?: string) {
     super(message);
     this.status = status;
+    this.code = code;
   }
 }
 
@@ -35,6 +38,10 @@ const ERRORS: Record<string, string> = {
   no_price: "Prices are updating. Try again in a moment.",
   not_ready: "Revolve is starting up. Try again in a moment.",
   not_found: "Order not found",
+  invalid_tokens: "Some credits were not accepted.",
+  token_spent: "Some of these credits were already used.",
+  already_minted: "These credits were already issued.",
+  not_funded: "This funding has not arrived yet.",
 };
 
 function checkQuote(q: Quote, amountZec: string): Quote {
@@ -46,7 +53,7 @@ function checkQuote(q: Quote, amountZec: string): Quote {
   return q;
 }
 
-async function call<T>(path: string, init?: RequestInit): Promise<T> {
+export async function call<T>(path: string, init?: RequestInit): Promise<T> {
   if (!ORDER_API || ORDER_API === "mock") throw new OrderApiError("order service not configured", 0);
   const res = await fetch(`${ORDER_API}${path}`, {
     ...init,
@@ -57,11 +64,13 @@ async function call<T>(path: string, init?: RequestInit): Promise<T> {
   });
   if (!res.ok) {
     let msg = `Order service unavailable (${res.status})`;
+    let code: string | undefined;
     try {
       const body = (await res.json()) as { error?: string };
-      if (body.error) msg = ERRORS[body.error] ?? msg;
+      code = body.error;
+      if (code) msg = ERRORS[code] ?? msg;
     } catch {}
-    throw new OrderApiError(msg, res.status);
+    throw new OrderApiError(msg, res.status, code);
   }
   return (await res.json()) as T;
 }
@@ -105,13 +114,13 @@ export async function getOrder(orderId: string): Promise<OrderState | null> {
 const MOCK_UA = "u1" + "mockdepositaddressqpzry9x8gf2tvdw0s3jn54khce6mua7l".replace(/[^02-9ac-hj-np-z]/g, "q").repeat(2);
 const MOCK_KEY = "revolve.mock.orders";
 
-const mock = {
+export const mock = {
   async limits(): Promise<Limits> {
     // Real ZEC price, made-up inventory: a range wide enough to try every message.
     const usd = (await usdPrice(ZEC_MINT).catch(() => null)) ?? 1224.5;
     return parseLimits({ min_zec: "0.002", max_zec: "0.05", step_zec: "0.001", indicative_usd_per_zec: usd.toFixed(2) });
   },
-  load(): Record<string, { created: number; amount: string }> {
+  load(): Record<string, { created: number; amount: string; credits?: boolean }> {
     try {
       return JSON.parse(sessionStorage.getItem(MOCK_KEY) ?? "{}");
     } catch {
@@ -132,10 +141,19 @@ const mock = {
       quote_expires_at: new Date(Date.now() + 15 * 60_000).toISOString(),
     };
   },
+  /** A credits order: already backed, so it goes straight to the payout delay. */
+  credit(amount: string): { order_id: string; payout_lamports: string } {
+    const q = mock.create(amount);
+    const all = mock.load();
+    all[q.order_id]!.credits = true;
+    sessionStorage.setItem(MOCK_KEY, JSON.stringify(all));
+    return { order_id: q.order_id, payout_lamports: q.payout_lamports };
+  },
   get(id: string): OrderState | null {
     const o = mock.load()[id];
     if (!o) return null;
     const s = (Date.now() - o.created) / 1000;
+    if (o.credits) return s < 20 ? { status: "confirmed", confirmations: 0, payout_signature: null } : { status: "paid_out", payout_signature: "MockPayoutSignature" };
     if (s < 25) return { status: "awaiting_payment", confirmations: 0, payout_signature: null };
     if (s < 55) return { status: "seen", confirmations: Math.min(2, Math.floor((s - 25) / 10)), payout_signature: null };
     if (s < 75) return { status: "confirmed", confirmations: 3, payout_signature: null };

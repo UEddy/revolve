@@ -68,3 +68,31 @@ export async function evalPrf(credId: string | null): Promise<{ credId: string; 
   if (!prf) throw new PrfUnsupported("the passkey returned no PRF output");
   return { credId: b64url(new Uint8Array(assertion.rawId)), prf };
 }
+
+/** Flags byte of WebAuthn authenticatorData: user present (bit 0) and user verified (bit 2). */
+export function assertionFlags(authenticatorData: ArrayBuffer | Uint8Array): { up: boolean; uv: boolean } {
+  const d = authenticatorData instanceof Uint8Array ? authenticatorData : new Uint8Array(authenticatorData);
+  const flags = d[32];
+  if (flags === undefined) throw new Error("authenticator data too short");
+  return { up: (flags & 0x01) !== 0, uv: (flags & 0x04) !== 0 };
+}
+
+/**
+ * A fresh "is it really you" check with the vault's own passkey, user
+ * verification required. Used before credits leave the vault. Refuses an
+ * assertion from another passkey or one without the user-verified flag.
+ */
+export async function confirmUser(credId: string): Promise<void> {
+  if (!passkeysAvailable()) throw new PrfUnsupported("no passkey support in this browser");
+  const cred = (await navigator.credentials.get({
+    publicKey: {
+      challenge: random(32),
+      userVerification: "required",
+      allowCredentials: [{ type: "public-key", id: fromB64url(credId) as Uint8Array<ArrayBuffer> }],
+    },
+  })) as PublicKeyCredential | null;
+  if (!cred) throw new Error("Confirmation was cancelled");
+  if (b64url(new Uint8Array(cred.rawId)) !== credId) throw new Error("That was a different passkey");
+  const { uv } = assertionFlags((cred.response as AuthenticatorAssertionResponse).authenticatorData);
+  if (!uv) throw new Error("The passkey did not verify you (no fingerprint, face or PIN)");
+}

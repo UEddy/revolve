@@ -2,7 +2,7 @@
 // every change sealed, and locking again when the phone is put away.
 
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
-import { createPasskey, evalPrf } from "../lib/passkey.ts";
+import { confirmUser, createPasskey, evalPrf } from "../lib/passkey.ts";
 import { deriveVaultKey, isSealed, seal, store, unseal, type Sealed } from "../lib/vault.ts";
 import { emptyVault, type Position, type VaultData } from "../lib/model.ts";
 
@@ -22,6 +22,10 @@ type VaultApi = {
   exportBackup(): string | null;
   restore(text: string): Promise<void>;
   destroy(): void;
+  /** A fresh passkey check (user verification required), e.g. before credits leave the vault. */
+  confirm(): Promise<void>;
+  /** The vault as of the last completed update (newer than `data` until React re-renders). */
+  snapshot(): VaultData | null;
 };
 
 const Ctx = createContext<VaultApi | null>(null);
@@ -142,6 +146,14 @@ export function VaultProvider({ children }: { children: ReactNode }) {
     setPhase("none");
   }, []);
 
+  const snapshot = useCallback(() => session.current?.data ?? null, []);
+
+  const confirm = useCallback(async () => {
+    const s = session.current;
+    if (!s) throw new Error("vault is locked");
+    await confirmUser(s.credId);
+  }, []);
+
   useEffect(() => {
     let hiddenAt = 0;
     const onVis = () => {
@@ -153,8 +165,8 @@ export function VaultProvider({ children }: { children: ReactNode }) {
   }, [lock]);
 
   const api = useMemo<VaultApi>(
-    () => ({ phase, data, create, unlock, lock, update, updatePosition, exportBackup, restore, destroy }),
-    [phase, data, create, unlock, lock, update, updatePosition, exportBackup, restore, destroy],
+    () => ({ phase, data, create, unlock, lock, update, updatePosition, exportBackup, restore, destroy, confirm, snapshot }),
+    [phase, data, create, unlock, lock, update, updatePosition, exportBackup, restore, destroy, confirm, snapshot],
   );
   return <Ctx.Provider value={api}>{children}</Ctx.Provider>;
 }
