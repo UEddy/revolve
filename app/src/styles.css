@@ -1,8 +1,8 @@
-/* Revolve. Layout, type and components. Colours come only from the tokens
+/* Revolve. Layout, type (Inter for display, Work Sans for body, both bundled) and components. Colours come only from the tokens
    in theme.css: no colour values here. */
 
 :root {
-  --display: "Besley", Georgia, serif;
+  --display: "Inter", system-ui, sans-serif;
   --body: "Work Sans", system-ui, sans-serif;
   --mono: ui-monospace, "SF Mono", Menlo, monospace;
 
