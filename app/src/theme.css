@@ -17,7 +17,6 @@
   --surface: #ffffff;
   --sunk: #f2f3f5;
   --line: #e2e4e9;
-  --accent-tint: #eef2fb;
 
   /* text */
   --ink: #0a0a0a;
@@ -53,7 +52,6 @@
     --surface: #0e0f12;
     --sunk: #1a1c21;
     --line: #2b2e36;
-    --accent-tint: #121a33;
 
     --ink: #ffffff;
     --muted: #b4b9c4;

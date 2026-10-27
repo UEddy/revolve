@@ -1,8 +1,9 @@
-// Order API client (API_CONTRACT.md v1). The server only ever learns a
-// bucket; what the user buys and where it lands stay on the device.
+// Order API client (API_CONTRACT.md v1.2). The server only ever learns an
+// amount; what the user buys and where it lands stay on the device.
 
-import { ORDER_API } from "./config.ts";
-import { BUCKETS, type Bucket } from "./config.ts";
+import { ORDER_API, ZEC_MINT } from "./config.ts";
+import { parseLimits, parseZec, type Limits } from "./amount.ts";
+import { usdPrice } from "./jupiter.ts";
 import type { OrderStatus } from "./model.ts";
 import { random } from "./bytes.ts";
 import { base32nopad } from "@scure/base";
@@ -28,16 +29,18 @@ export class OrderApiError extends Error {
 const ORDER_ID = /^[A-Za-z0-9_]{8,64}$/;
 
 const ERRORS: Record<string, string> = {
-  bucket_unavailable: "That amount is sold out right now. Try a smaller one.",
+  amount_unavailable: "That amount is more than Revolve can pay out right now. Try a smaller one.",
+  invalid_amount: "That amount can't be ordered. Use steps of 0.001 ZEC, at or above the minimum.",
   busy: "Lots of orders open right now. Try again in a minute.",
   no_price: "Prices are updating. Try again in a moment.",
-  invalid_bucket: "That amount is not offered.",
+  not_ready: "Revolve is starting up. Try again in a moment.",
   not_found: "Order not found",
 };
 
-function checkQuote(q: Quote, bucket: Bucket): Quote {
+function checkQuote(q: Quote, amountZec: string): Quote {
   if (!ORDER_ID.test(q.order_id)) throw new OrderApiError("server sent a malformed order id", 502);
-  if (q.amount_zec !== bucket) throw new OrderApiError("server quoted a different amount than asked", 502);
+  const quoted = parseZec(q.amount_zec);
+  if (quoted === null || quoted !== parseZec(amountZec)) throw new OrderApiError("server quoted a different amount than asked", 502);
   if (!/^\d+$/.test(q.payout_lamports) || BigInt(q.payout_lamports) <= 0n) throw new OrderApiError("server sent a bad payout", 502);
   if (!/^u1[02-9ac-hj-np-z]{20,}$/.test(q.deposit_ua)) throw new OrderApiError("server sent a bad deposit address", 502);
   return q;
@@ -63,23 +66,23 @@ async function call<T>(path: string, init?: RequestInit): Promise<T> {
   return (await res.json()) as T;
 }
 
-export async function createOrder(bucket: Bucket): Promise<Quote> {
-  if (import.meta.env.DEV && ORDER_API === "mock") return checkQuote(mock.create(bucket), bucket);
-  return checkQuote(await call<Quote>("/orders", { method: "POST", body: JSON.stringify({ bucket_zec: bucket }) }), bucket);
+/** `amountZec` is the canonical grid amount (formatZec), already checked against /limits. */
+export async function createOrder(amountZec: string): Promise<Quote> {
+  if (import.meta.env.DEV && ORDER_API === "mock") return checkQuote(mock.create(amountZec), amountZec);
+  return checkQuote(await call<Quote>("/orders", { method: "POST", body: JSON.stringify({ amount_zec: amountZec }) }), amountZec);
 }
 
-export type BucketState = { loading: true } | { loading: false; available: Record<string, boolean> };
+export type LimitsState = { loading: true } | { loading: false; limits: Limits };
 
 /**
- * Which amounts the payout inventory can cover right now. Missing buckets
- * count as unavailable. A 503 means the worker is still loading its price
- * and balance: that is "ask again soon", not "unavailable".
+ * Current amount limits and the indicative USD rate (GET /limits). A 503
+ * means the worker is still loading its price and balance: "ask again
+ * soon", not "unavailable".
  */
-export async function getBuckets(): Promise<BucketState> {
-  if (import.meta.env.DEV && ORDER_API === "mock") return { loading: false, available: Object.fromEntries(BUCKETS.map((b) => [b, true])) };
+export async function getLimits(): Promise<LimitsState> {
+  if (import.meta.env.DEV && ORDER_API === "mock") return { loading: false, limits: await mock.limits() };
   try {
-    const r = await call<{ buckets: { bucket_zec: string; available: boolean }[] }>("/buckets");
-    return { loading: false, available: Object.fromEntries(r.buckets.map((b) => [b.bucket_zec, b.available === true])) };
+    return { loading: false, limits: parseLimits(await call("/limits")) };
   } catch (e) {
     if (e instanceof OrderApiError && e.status === 503) return { loading: true };
     throw e;
@@ -103,23 +106,28 @@ const MOCK_UA = "u1" + "mockdepositaddressqpzry9x8gf2tvdw0s3jn54khce6mua7l".repl
 const MOCK_KEY = "revolve.mock.orders";
 
 const mock = {
-  load(): Record<string, { created: number; bucket: string }> {
+  async limits(): Promise<Limits> {
+    // Real ZEC price, made-up inventory: a range wide enough to try every message.
+    const usd = (await usdPrice(ZEC_MINT).catch(() => null)) ?? 1224.5;
+    return parseLimits({ min_zec: "0.002", max_zec: "0.05", step_zec: "0.001", indicative_usd_per_zec: usd.toFixed(2) });
+  },
+  load(): Record<string, { created: number; amount: string }> {
     try {
       return JSON.parse(sessionStorage.getItem(MOCK_KEY) ?? "{}");
     } catch {
       return {};
     }
   },
-  create(bucket: Bucket): Quote {
+  create(amount: string): Quote {
     const id = "rv_" + base32nopad.encode(random(5)).toLowerCase();
     const all = mock.load();
-    all[id] = { created: Date.now(), bucket };
+    all[id] = { created: Date.now(), amount };
     sessionStorage.setItem(MOCK_KEY, JSON.stringify(all));
-    const lamports = BigInt(Math.round(Number(bucket) * 12.2 * 1e9));
+    const lamports = BigInt(Math.round(Number(amount) * 12.2 * 1e9));
     return {
       order_id: id,
       deposit_ua: MOCK_UA,
-      amount_zec: bucket,
+      amount_zec: amount,
       payout_lamports: lamports.toString(),
       quote_expires_at: new Date(Date.now() + 15 * 60_000).toISOString(),
     };

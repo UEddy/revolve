@@ -27,7 +27,7 @@ function contrast(a: string, b: string): number {
 
 // [foreground, background, minimum]. Text is 4.5:1 (AA body text); marks
 // that are not text (meter bars, focus ring, warning dots) are 3:1.
-const SURFACES = ["bg", "surface", "sunk", "accent-tint"];
+const SURFACES = ["bg", "surface", "sunk"];
 const PAIRS: [string, string, number][] = [
   ...["ink", "muted", "faint", "link", "danger"].flatMap((fg) => SURFACES.map((bg): [string, string, number] => [fg, bg, 4.5])),
   ["caution", "sunk", 4.5], // .badge.caution

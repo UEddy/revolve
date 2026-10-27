@@ -102,15 +102,24 @@ h3 { font-size: 16px; margin: 0; }
 }
 .seg button[aria-pressed="true"] { background: var(--surface); color: var(--ink); box-shadow: var(--shadow); }
 
-.chips { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
-.chip {
-  border: 1.5px solid var(--line); background: var(--surface); border-radius: 18px; padding: 12px 8px;
-  text-align: center; cursor: pointer; transition: border-color 160ms, transform 160ms var(--pop);
+/* amount field: a large number, its unit, and a USD/ZEC toggle */
+.amount {
+  display: flex; align-items: center; gap: 10px; padding: 10px 10px 10px 16px;
+  background: var(--surface); border: 1.5px solid var(--line); border-radius: var(--r-card);
+  transition: border-color 160ms;
 }
-.chip strong { display: block; font: 700 17px var(--display); }
-.chip span { font-size: 13px; color: var(--muted); }
-.chip[aria-pressed="true"] { border-color: var(--accent-mark); background: var(--accent-tint); transform: scale(1.03); }
-.chip:disabled { opacity: 0.45; cursor: default; }
+.amount:focus-within { border-color: var(--accent-mark); }
+.amount.invalid { border-color: var(--danger); }
+.amount > .row { flex: 1; min-width: 0; gap: 6px; }
+.amount-input {
+  flex: 1; min-width: 0; border: 0; background: none; color: var(--ink); padding: 6px 0;
+  font: 700 34px/1.1 var(--display); letter-spacing: -0.01em;
+}
+.amount-input:focus { outline: none; }
+.amount-unit { font: 700 22px var(--display); color: var(--muted); }
+.seg.unit { margin: 0; flex: none; }
+.seg.unit button { min-height: 34px; padding: 0 12px; font-size: 13px; }
+.amount-msg { min-height: 20px; margin: 8px 4px 0; }
 
 /* ---------- tab bar ---------- */
 .tabs {
