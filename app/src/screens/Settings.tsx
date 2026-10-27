@@ -24,7 +24,7 @@ export function Settings() {
       <h2>Backup</h2>
       <div className="card flat stack">
         <p className="muted" style={{ margin: 0 }}>
-          Your wallets live only on this phone. A backup file is the same sealed vault: useless without your passkey, so it is
+          Your wallets and credits live only on this phone. A backup file is the same sealed vault: useless without your passkey, so it is
           safe to keep in your files or cloud. If you lose this phone, restore it on a new one signed in to the same passkey
           account.
         </p>
@@ -42,6 +42,7 @@ export function Settings() {
         <div className="kv"><span>Zcash chain</span><span style={{ textAlign: "right" }}>A shielded payment. Not who, not how much, not why.</span></div>
         <div className="kv"><span>Revolve's payout service</span><span style={{ textAlign: "right" }}>An order id and which new wallet to pay, until the payout. Then it forgets. Never what you buy.</span></div>
         <div className="kv"><span>Public ledger</span><span style={{ textAlign: "right" }}>A Revolve payout to a fresh wallet, then a trade. Not linked to you or your other wallets.</span></div>
+        <div className="kv"><span>Revolve credits</span><span style={{ textAlign: "right" }}>That you added funds, and later that some credits were spent. Blind signatures stop it from telling which funding paid for which buy. Timing and amounts can still pair them; the coach warns you.</span></div>
         <div className="kv"><span>Revolve relay</span><span style={{ textAlign: "right" }}>Carries price and balance requests so data providers never see your IP. Keeps no logs.</span></div>
         <div className="kv"><span>This phone</span><span style={{ textAlign: "right" }}>Everything, sealed under your passkey.</span></div>
       </div>

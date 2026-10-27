@@ -1,5 +1,7 @@
 import { VaultProvider, useVault } from "./state/vault.tsx";
 import { EngineProvider } from "./state/engine.tsx";
+import { CreditsProvider } from "./state/credits.tsx";
+import { FundScreen, FundingScreen } from "./screens/Fund.tsx";
 import { useRoute, href } from "./router.ts";
 import { Welcome, Unlock } from "./screens/Gate.tsx";
 import { Home } from "./screens/Home.tsx";
@@ -33,12 +35,16 @@ function Screens() {
   if (phase === "locked") return <Unlock />;
   return (
     <EngineProvider>
+      <CreditsProvider>
       {route.name === "home" && <Home />}
       {route.name === "discover" && <Discover />}
       {route.name === "token" && <TokenScreen key={route.mint} mint={route.mint} />}
       {route.name === "position" && <PositionScreen key={route.id} id={route.id} />}
       {route.name === "settings" && <Settings />}
+      {route.name === "fund" && <FundScreen />}
+      {route.name === "funding" && <FundingScreen key={route.id} id={route.id} />}
       {(route.name === "home" || route.name === "discover" || route.name === "settings") && <Tabs at={route.name} />}
+      </CreditsProvider>
     </EngineProvider>
   );
 }

@@ -4,7 +4,7 @@
 // it cannot prevent.
 
 import type { Limits } from "./amount.ts";
-import type { Position, TokenRef } from "./model.ts";
+import type { Credits, Position, TokenRef } from "./model.ts";
 
 export type Level = "low" | "medium" | "high";
 export type Reason = { points: number; text: string };
@@ -90,6 +90,39 @@ export function amountNote(zats: bigint, limits: Limits): Warning | null {
     title: "A larger amount than most",
     body: "Bigger payouts are rarer, so fewer look like yours. A smaller amount, or a few buys spread over time, blends in better.",
   };
+}
+
+const SPEND_SOON_MS = 60 * MIN;
+
+/**
+ * Before a credits spend. The mint can't link tokens to a funding, but
+ * timing and amounts still can: a spend right after a funding, or one that
+ * empties the balance (above all when it equals the funded amount), pairs
+ * the two for anyone watching both sides.
+ */
+export function creditWarnings(spendCredits: number, credits: Credits | undefined, now: number): Warning[] {
+  const w: Warning[] = [];
+  const balance = credits?.tokens.length ?? 0;
+  const minted = credits?.fundings.filter((f) => f.mintedAt).sort((a, b) => b.mintedAt! - a.mintedAt!)[0];
+  if (minted?.mintedAt && now - minted.mintedAt < SPEND_SOON_MS) {
+    const m = Math.max(1, Math.round((now - minted.mintedAt) / MIN));
+    w.push({
+      level: "medium",
+      title: `You added funds ${m} minute${m === 1 ? "" : "s"} ago`,
+      body: "A buy right after funding can be paired with it by timing. Waiting a while before spending breaks that link.",
+    });
+  }
+  if (spendCredits > 0 && spendCredits === balance) {
+    const same = minted && minted.credits === spendCredits;
+    w.push({
+      level: "medium",
+      title: "This uses your whole balance",
+      body: same
+        ? "It's also exactly the amount you added, so the funding and this buy can be matched by amount. Spending part of it, or buying in a few smaller steps, blends in better."
+        : "Emptying the balance in one buy makes the amount easier to match to your funding. Spending part of it blends in better.",
+    });
+  }
+  return w;
 }
 
 export function sendWarnings(from: Position, to: string, all: Position[]): Warning[] {
