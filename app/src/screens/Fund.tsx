@@ -11,7 +11,6 @@ import { Check } from "../components/icons.tsx";
 import { formatZec } from "../lib/amount.ts";
 import { buildFundMemo, creditsToZats, FUND_MAX_ZATS, FUND_MIN_ZATS } from "../lib/credits.ts";
 import { MOCK, ZEC_MINT } from "../lib/config.ts";
-import { zip321 } from "../lib/memo.ts";
 import { usd } from "../lib/format.ts";
 import { go, href } from "../router.ts";
 import type { Funding } from "../lib/model.ts";
@@ -119,17 +118,18 @@ export function FundingScreen({ id }: { id: string }) {
   const { credits, balance } = useCredits();
   const f = credits?.fundings.find((x) => x.fundId === id);
   if (!f) return <div className="screen"><TopBar title="Add funds" /><p className="empty">This funding is not in your vault.</p></div>;
-  const steps = ["Pay from Zodl", "Payment seen", "Confirming (3 blocks)", "Issuing credits"];
+  const steps = ["Pay from your Zcash wallet", "Payment seen", "Confirming (3 blocks)", "Issuing credits"];
   const at = fundingStep(f);
   return (
     <div className="screen">
       <TopBar title="Add funds" right={f.demo ? <span className="badge caution">Demo</span> : undefined} />
       {f.status === "awaiting_payment" && (
         <PayCard
+          depositUa={f.depositUa}
           amountZec={f.amountZec}
+          memo={() => buildFundMemo(f.fundId)}
           expiresAt={f.expiresAt}
-          link={() => zip321(f.depositUa, f.amountZec, buildFundMemo(f.fundId))}
-          memoNote="The memo only names this funding; it carries nothing about you and is encrypted on chain."
+          memoNote="The message only names this funding; it carries nothing about you and is encrypted on chain."
         />
       )}
       {f.status === "minted" && (

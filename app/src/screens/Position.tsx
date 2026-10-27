@@ -6,7 +6,8 @@ import { base58 } from "@scure/base";
 import { fromB64 } from "../lib/bytes.ts";
 import { pubkeyBytes } from "../lib/burner.ts";
 import { useVault } from "../state/vault.tsx";
-import { useEngine, paymentLink } from "../state/engine.tsx";
+import { useEngine } from "../state/engine.tsx";
+import { buildMemo } from "../lib/memo.ts";
 import { positionRisk } from "../lib/coach.ts";
 import { MOCK, SOL_MINT } from "../lib/config.ts";
 import { amount, countdown, usd, units } from "../lib/format.ts";
@@ -37,7 +38,7 @@ function steps(p: Position): { list: Step[]; at: number } {
   }
   const conf = Math.min(3, p.order.confirmations);
   const list: Step[] = [
-    { key: "pay", label: "Pay from Zodl", detail: `${p.order.amountZec} ZEC, shielded` },
+    { key: "pay", label: "Pay from your Zcash wallet", detail: `${p.order.amountZec} ZEC, shielded` },
     { key: "seen", label: "Payment seen", detail: "Still shielded. Nobody can see who paid." },
     { key: "conf", label: "Confirming", detail: `${conf} of 3 blocks` },
     { key: "delay", label: "Privacy delay", detail: "A random 2 to 6 block wait, so timing can't pair you with the payout" },
@@ -148,10 +149,11 @@ export function PositionScreen({ id }: { id: string }) {
           <div className="spacer" />
           {p.stage === "awaiting_payment" && (
             <PayCard
+              depositUa={p.order.depositUa}
               amountZec={p.order.amountZec}
+              memo={() => buildMemo(p.order.id, p.burner.pub)}
               expiresAt={p.order.quoteExpiresAt}
-              link={() => paymentLink(p)}
-              memoNote="The memo tells the payout where to go and is encrypted on chain."
+              memoNote="The message tells the payout where to go and is encrypted on chain."
             />
           )}
           {p.stage === "expired" && (

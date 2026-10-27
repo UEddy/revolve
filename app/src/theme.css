@@ -41,6 +41,10 @@
   --banner-bg: #f26a2e;
   --banner-ink: #0a0a0a;
 
+  /* payment QR: black on white in both modes, the contrast phone scanners need */
+  --qr-ink: #000000;
+  --qr-paper: #ffffff;
+
   /* depth */
   --scrim: rgb(0 0 0 / 0.4);
   --shadow: 0 1px 2px rgb(0 0 0 / 0.05), 0 8px 24px rgb(0 0 0 / 0.07);
