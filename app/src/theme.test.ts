@@ -29,14 +29,13 @@ function contrast(a: string, b: string): number {
 // that are not text (meter bars, focus ring, warning dots) are 3:1.
 const SURFACES = ["bg", "surface", "sunk"];
 const PAIRS: [string, string, number][] = [
-  ...["ink", "muted", "faint", "link", "danger"].flatMap((fg) => SURFACES.map((bg): [string, string, number] => [fg, bg, 4.5])),
-  ["caution", "sunk", 4.5], // .badge.caution
+  ...["ink", "muted", "faint", "link", "danger", "caution"].flatMap((fg) => SURFACES.map((bg): [string, string, number] => [fg, bg, 4.5])),
   ["on-accent", "accent", 4.5], // buttons, active tab, done steps
   ["on-accent", "accent-press", 4.5],
   ["on-danger", "danger-fill", 4.5],
   ["banner-ink", "banner-bg", 4.5],
   ...["bg", "surface", "sunk"].map((bg): [string, string, number] => ["accent-mark", bg, 3]),
-  ["caution-mark", "sunk", 3], // warning dot
+  ...SURFACES.map((bg): [string, string, number] => ["caution-mark", bg, 3]), // warning dots
 ];
 
 for (const [mode, t] of [["light", light], ["dark", dark]] as const) {
@@ -50,9 +49,42 @@ for (const [mode, t] of [["light", light], ["dark", dark]] as const) {
   });
 }
 
-test("navy is never a text colour on the dark background", () => {
-  assert.ok(contrast(dark.accent!, dark.bg!) < 4.5, "sanity: navy on black is unreadable");
-  for (const fg of ["ink", "muted", "faint", "link"]) assert.notEqual(dark[fg], dark.accent, `${fg} must not be navy in dark mode`);
+const GOLD = "#f4b728";
+
+test("#F4B728 is never used as text or marks on light backgrounds", () => {
+  assert.ok(contrast(GOLD, light.bg!) < 3, "sanity: ZEC gold on white is too faint for text or thin marks");
+  assert.equal(light.accent, GOLD, "the light accent fill is ZEC gold");
+  for (const fg of ["ink", "muted", "faint", "link", "danger", "caution", "accent-mark", "caution-mark", "on-accent"]) {
+    assert.notEqual(light[fg], GOLD, `${fg} must not be #F4B728 in light mode`);
+  }
+});
+
+test("the accent fill is ZEC gold under black text in both modes", () => {
+  for (const t of [light, dark]) {
+    assert.equal(t.accent, GOLD);
+    assert.equal(t["on-accent"], "#0a0a0a");
+    assert.ok(luminance(t["accent-press"]!) < luminance(t.accent!), "pressed is darker");
+  }
+});
+
+/** Hue in degrees, for telling warnings apart from the accent. */
+function hue(hex: string): number {
+  const [r, g, b] = [1, 3, 5].map((i) => parseInt(hex.slice(i, i + 2), 16) / 255) as [number, number, number];
+  const max = Math.max(r, g, b), d = max - Math.min(r, g, b);
+  if (d === 0) return 0;
+  const h = max === r ? ((g - b) / d) % 6 : max === g ? (b - r) / d + 2 : (r - g) / d + 4;
+  return (h * 60 + 360) % 360;
+}
+
+test("warnings don't look like the accent: orange-red, clearly off gold, and not the danger red", () => {
+  for (const [mode, t] of [["light", light], ["dark", dark]] as const) {
+    for (const w of ["caution", "caution-mark", "banner-bg"]) {
+      const h = hue(t[w]!);
+      assert.ok(hue(GOLD) - h >= 15, `${mode} ${w} (${t[w]}, hue ${h.toFixed(0)}) is too close to gold (hue ${hue(GOLD).toFixed(0)})`);
+      assert.ok(h >= 10 && h <= 30, `${mode} ${w} (${t[w]}, hue ${h.toFixed(0)}) is not orange-red`);
+    }
+    assert.notEqual(t.caution, t.danger, `${mode}: medium risk must not be the high-risk red`);
+  }
 });
 
 test("no colour values outside theme.css", () => {

@@ -1,13 +1,15 @@
 /* Revolve colour tokens: the only place a colour value is written.
-   White and black with navy as the single accent; a muted red and amber
-   for errors and the privacy coach's warnings.
+   White and black with ZEC gold (#F4B728) as the single accent; red for
+   errors and high risk, an orange-red for medium-risk warnings, the demo
+   banner and "Unverified", so a warning never looks like the accent.
 
    Rules (checked by src/theme.test.ts):
-   - every text token passes WCAG AA (4.5:1) on every surface it sits on;
-   - --accent is a fill behind --on-accent text, never a text colour. In dark
-     mode navy on black is about 2:1, so links there are white, and the
-     non-text marks (meter, focus ring, selected border) use --accent-mark,
-     a lighter navy that keeps 3:1 against the dark surfaces.
+   - every text token passes WCAG AA (4.5:1) on every surface it sits on, and
+     non-text marks (meter, focus ring, selected border, warning dots) 3:1;
+   - --accent is a fill behind black --on-accent text in both modes.
+   - On white, #F4B728 is about 1.8:1, so in light mode it is never text or a
+     thin mark: links use a deep gold (--link, #8A5F00) and marks a darker
+     gold (--accent-mark, #B07A00). In dark mode #F4B728 is all three.
    index.html (theme-color) and public/manifest.webmanifest must repeat
    --bg as literal values; keep them in step. */
 
@@ -22,21 +24,21 @@
   --ink: #0a0a0a;
   --muted: #4a5160;
   --faint: #5f6673;
-  --link: #1e3a8a;
+  --link: #8a5f00;
 
-  /* navy accent */
-  --accent: #1e3a8a;
-  --accent-press: #172e6e;
-  --on-accent: #ffffff;
-  --accent-mark: #1e3a8a;
+  /* ZEC gold accent */
+  --accent: #f4b728;
+  --accent-press: #dfa51f;
+  --on-accent: #0a0a0a;
+  --accent-mark: #b07a00;
 
-  /* errors and warnings */
+  /* errors (and high risk) in red; warnings (medium risk, demo, unverified) in orange-red */
   --danger: #b42318;
   --danger-fill: #b42318;
   --on-danger: #ffffff;
-  --caution: #8a4b08;
-  --caution-mark: #b45309;
-  --banner-bg: #fbbf24;
+  --caution: #c2410c;
+  --caution-mark: #e5560b;
+  --banner-bg: #f26a2e;
   --banner-ink: #0a0a0a;
 
   /* depth */
@@ -56,19 +58,19 @@
     --ink: #ffffff;
     --muted: #b4b9c4;
     --faint: #9aa0ac;
-    --link: #ffffff;
+    --link: #f4b728;
 
-    --accent: #1e3a8a;
-    --accent-press: #172e6e;
-    --on-accent: #ffffff;
-    --accent-mark: #6b8ae6;
+    --accent: #f4b728;
+    --accent-press: #dfa51f;
+    --on-accent: #0a0a0a;
+    --accent-mark: #f4b728;
 
     --danger: #f87171;
     --danger-fill: #b42318;
     --on-danger: #ffffff;
-    --caution: #fbbf24;
-    --caution-mark: #f59e0b;
-    --banner-bg: #fbbf24;
+    --caution: #ff7a45;
+    --caution-mark: #ff7a45;
+    --banner-bg: #f26a2e;
     --banner-ink: #0a0a0a;
 
     --scrim: rgb(0 0 0 / 0.7);

@@ -21,8 +21,9 @@ export const Spark = (p: P) => (<svg {...base} {...p}><path d="M12 3v4M12 17v4M3
 
 /**
  * The Revolve mark, drawn from src/assets/brand/revolve-mark-*.svg with theme
- * tokens instead of fixed colours: ink ring, navy orbit (the lighter navy in
- * dark mode), exactly as the kit's light and dark files. Inside a filled
+ * tokens instead of fixed colours: ink ring, gold orbit (--accent-mark: the
+ * darker gold on white, ZEC gold in dark mode), exactly as the kit's light and
+ * dark files. Inside a filled
  * button it takes the text colour (styles.css).
  */
 export const Mark = ({ className, ...p }: P) => (
