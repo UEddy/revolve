@@ -2,12 +2,16 @@ import { createHash, randomBytes, randomInt } from "node:crypto";
 import type { DatabaseSync } from "node:sqlite";
 import { PublicKey } from "@solana/web3.js";
 
-/** Fixed buckets from API_CONTRACT.md, in zatoshis. */
+/** Deprecated fixed buckets, still served by GET /buckets (API_CONTRACT.md v1.2), in zatoshis. */
 export const BUCKETS: Record<string, bigint> = {
   "0.002": 200_000n,
   "0.005": 500_000n,
   "0.01": 1_000_000n,
 };
+
+/** Order amount grid from API_CONTRACT.md v1.2, in zatoshis. */
+export const MIN_ZAT = 200_000n;
+export const STEP_ZAT = 100_000n;
 
 export const REQUIRED_CONFS = 3;
 const PAID_CACHE_MS = 15 * 60 * 1000;
@@ -99,6 +103,16 @@ export function isValidBurner(s: string): boolean {
   }
 }
 
+/** Strict decimal ZEC string (at most 8 places, no sign or exponent) to zatoshis, else null. */
+export function zecToZat(s: string): bigint | null {
+  const m = /^(0|[1-9]\d{0,7})(?:\.(\d{1,8}))?$/.exec(s);
+  if (!m) return null;
+  return BigInt(m[1]) * 100_000_000n + BigInt((m[2] ?? "").padEnd(8, "0"));
+}
+
+/** True for an amount an order may be placed for: on the grid and at least the minimum. */
+export const onGrid = (zat: bigint) => zat >= MIN_ZAT && zat % STEP_ZAT === 0n;
+
 export function zatToZec(zat: bigint): string {
   const whole = zat / 100_000_000n;
   const frac = (zat % 100_000_000n).toString().padStart(8, "0").replace(/0+$/, "");
@@ -134,18 +148,18 @@ export class OrderBook {
     return rows.reduce((sum, r) => sum + BigInt(r.payout_lamports), 0n);
   }
 
-  create(bucketZec: string, payoutLamports: bigint, ttlSecs: number) {
-    const bucketZat = BUCKETS[bucketZec];
+  /** `amountZat` is the exact deposit the order matches; the bucket_zat column holds it. */
+  create(amountZat: bigint, payoutLamports: bigint, ttlSecs: number) {
     const orderId = newOrderId();
     const expiresAt = Math.floor(this.now() / 1000) + ttlSecs;
     this.db
       .prepare(
         "INSERT INTO orders (order_id, bucket_zat, payout_lamports, expires_at, status) VALUES (?, ?, ?, ?, 'awaiting_payment')",
       )
-      .run(orderId, Number(bucketZat), payoutLamports.toString(), expiresAt);
+      .run(orderId, Number(amountZat), payoutLamports.toString(), expiresAt);
     return {
       order_id: orderId,
-      amount_zec: zatToZec(bucketZat),
+      amount_zec: zatToZec(amountZat),
       payout_lamports: payoutLamports.toString(),
       quote_expires_at: new Date(expiresAt * 1000).toISOString().replace(/\.\d{3}Z$/, "Z"),
     };
