@@ -80,6 +80,12 @@ h3 { font-size: 16px; margin: 0; }
 .btn:disabled { opacity: 0.5; cursor: default; transform: none; }
 .btn.ghost { background: var(--sunk); color: var(--ink); }
 .btn.ghost:active { background: var(--line); }
+/* A button that reads as a text link (e.g. "How it works"), with a full-size tap target. */
+.textlink {
+  align-self: center; min-height: 44px; padding: 0 12px; border: 0; background: none; cursor: pointer;
+  color: var(--link); font: 600 15px var(--body); text-decoration: underline; text-underline-offset: 3px;
+}
+.stack > .textlink { display: block; margin-left: auto; margin-right: auto; }
 .btn.small { min-height: 40px; font-size: 14px; width: auto; padding: 0 16px; }
 .btn.danger { background: var(--danger-fill); color: var(--on-danger); }
 .icon-btn {
@@ -338,9 +344,9 @@ body:has(.sheet) .install { display: none; }
   .welcome { --wm-at: 16dvh; --gap-min: 16px; }
 }
 .welcome h1 { font-size: 36px; margin: 0 0 12px; }
-.welcome .points { list-style: none; padding: 0; margin: 18px 0 0; }
-.welcome .points li { display: flex; gap: 12px; padding: 10px 0; }
-.welcome .points svg { width: 22px; height: 22px; color: var(--accent-mark); flex: none; margin-top: 1px; }
+.points { list-style: none; padding: 0; margin: 18px 0 0; }
+.points li { display: flex; gap: 12px; padding: 10px 0; }
+.points svg { width: 22px; height: 22px; color: var(--accent-mark); flex: none; margin-top: 1px; }
 .err { color: var(--danger); font-size: 14px; }
 .center { text-align: center; }
 .empty { text-align: center; padding: 34px 10px; color: var(--muted); }
