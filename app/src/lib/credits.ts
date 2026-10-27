@@ -98,14 +98,45 @@ export function lastMinted(c: Credits | undefined): Funding | undefined {
 
 /**
  * What a spend's answer means for its tokens (CREDITS_CONTRACT.md, App rules).
- * - created: the tokens are spent; the order exists.
- * - unavailable (409 amount_unavailable): nothing was consumed; tokens go back.
+ * - created: the tokens are spent; the order exists. A resend of the very
+ *   same tokens, amount and burner gets the same order back.
+ * - unavailable: refused with nothing consumed; tokens go back. See
+ *   spendOutcomeFor for why that holds even after an unanswered try.
  * - spent (409 token_spent) or invalid (400 invalid_tokens): never reuse them.
  *   If an earlier try failed without an answer, that try probably went
- *   through: the payout can still arrive at the burner.
- * - network: keep them pending and retry with the very same tokens.
+ *   through and was already paid out (the server forgets an order's resend
+ *   key at payout): the payout can still arrive at the burner.
+ * - network or error: no clear answer; keep them pending and retry with the
+ *   very same tokens.
+ * - wait (503 mint_unavailable): nothing consumed now, but it says nothing
+ *   about an earlier try; keep them pending and retry.
  */
-export type SpendOutcome = "created" | "unavailable" | "spent" | "invalid" | "network" | "error";
+export type SpendOutcome = "created" | "unavailable" | "spent" | "invalid" | "network" | "error" | "wait";
+
+/**
+ * A spend's error code to its outcome. busy, no_price and amount_unavailable
+ * are only answered after the server found none of the tokens spent (and no
+ * order for this exact request), and invalid_amount / invalid_burner refuse
+ * the request itself, so an earlier identical try was refused the same way.
+ */
+export function spendOutcomeFor(code: string | undefined): Exclude<SpendOutcome, "created" | "network"> {
+  switch (code) {
+    case "amount_unavailable":
+    case "busy":
+    case "no_price":
+    case "invalid_amount":
+    case "invalid_burner":
+      return "unavailable";
+    case "token_spent":
+      return "spent";
+    case "invalid_tokens":
+      return "invalid";
+    case "mint_unavailable":
+      return "wait";
+    default:
+      return "error";
+  }
+}
 
 export function tokensAfter(outcome: SpendOutcome): "spent" | "return" | "drop" | "keep_pending" {
   switch (outcome) {
@@ -118,6 +149,21 @@ export function tokensAfter(outcome: SpendOutcome): "spent" | "return" | "drop" 
       return "drop";
     case "network":
     case "error":
+    case "wait":
       return "keep_pending";
   }
+}
+
+/**
+ * What a failed /sign means for the funding. The same blinded set always gets
+ * its signatures again, so a lost answer or a hiccup is simply retried.
+ * - review: 409 already_minted (a different set was signed: another copy of
+ *   this vault) or 400 invalid_blinded (the mint won't take this set).
+ * - refresh: 409 not_funded or 404: the server's status moved on; ask it.
+ * - retry: anything else (503 mint_unavailable, network, 5xx).
+ */
+export function afterSignError(status: number, code: string | undefined): "review" | "refresh" | "retry" {
+  if (code === "already_minted" || code === "invalid_blinded") return "review";
+  if (code === "not_funded" || status === 404) return "refresh";
+  return "retry";
 }

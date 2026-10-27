@@ -9,7 +9,7 @@ import { newBurner } from "../lib/burner.ts";
 import { random } from "../lib/bytes.ts";
 import { MOCK } from "../lib/config.ts";
 import { parseZec } from "../lib/amount.ts";
-import { balanceCredits, blindFor, creditsFor, importMintKey, keyFingerprint, tokensAfter, unblindAll } from "../lib/credits.ts";
+import { afterSignError, balanceCredits, blindFor, creditsFor, importMintKey, keyFingerprint, tokensAfter, unblindAll } from "../lib/credits.ts";
 import { createFunding, getFunding, getMintKey, signFunding, spend, type MintKey } from "../lib/mint.ts";
 import { OrderApiError } from "../lib/orders.ts";
 import { creditsOf, type CreditToken, type Credits, type Funding, type TokenRef } from "../lib/model.ts";
@@ -126,13 +126,30 @@ export function CreditsProvider({ children }: { children: ReactNode }) {
         try {
           signatures = await signFunding(fundId, blind.blinded);
         } catch (e) {
-          if (e instanceof OrderApiError && e.status === 409) {
-            // Already signed, but the answer never reached this phone.
+          const fate = e instanceof OrderApiError ? afterSignError(e.status, e.code) : "retry";
+          if (fate === "review") {
             await updateFunding(fundId, (x) => {
               x.status = "needs_review";
-              x.error = "The credits were issued but the answer was lost on the way. Keep this funding id for support.";
+              x.error =
+                e instanceof OrderApiError && e.code === "already_minted"
+                  ? "These credits were issued to another copy of this wallet."
+                  : "Revolve didn't accept this phone's request for credits.";
+            });
+          } else if (fate === "refresh") {
+            // The server's status moved on (expired, under review, or forgotten): take its word.
+            const s = await getFunding(fundId).catch(() => undefined);
+            if (s === undefined) return;
+            await updateFunding(fundId, (x) => {
+              if (s === null || s.status === "minted") {
+                x.status = "needs_review";
+                x.error = s ? "These credits were issued but not to this phone." : "Revolve no longer has a record of this funding.";
+              } else if (s.status !== "funded") {
+                x.status = s.status;
+                delete x.error;
+              }
             });
           } else {
+            // Kept: the blinding state stays sealed, and the next try resends the same set.
             await updateFunding(fundId, (x) => void (x.error = e instanceof Error ? e.message : String(e)));
           }
           return;

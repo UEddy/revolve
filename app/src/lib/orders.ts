@@ -42,6 +42,9 @@ const ERRORS: Record<string, string> = {
   token_spent: "Some of these credits were already used.",
   already_minted: "These credits were already issued.",
   not_funded: "This funding has not arrived yet.",
+  invalid_burner: "This order's wallet address was refused.",
+  invalid_blinded: "Revolve didn't accept this phone's request for credits.",
+  mint_unavailable: "Credits are paused for a moment. Try again shortly.",
 };
 
 function checkQuote(q: Quote, amountZec: string): Quote {
