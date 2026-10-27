@@ -15,7 +15,7 @@ export interface Config {
   swapFeeLamports: bigint;
   quoteTtlSecs: number;
   maxOpenOrders: number;
-  /** PKCS#8 PEM of the credits mint key, outside the repo; empty disables /mint. */
+  /** PKCS#8 PEM of the credits mint key, outside any work tree and code folder (keypath.ts); empty or unloadable disables /mint. */
   mintKeyPath: string;
   mintKeyId: string;
 }

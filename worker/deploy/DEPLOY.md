@@ -102,7 +102,10 @@ grep -o '^DEPOSIT_UA=.\{20\}' /opt/revolve/worker/.env   # must start the same a
 
 Generated on the droplet as `revolve`, so it never leaves the server. The script
 refuses to overwrite an existing key and prints only the public key fingerprint.
-Replacing the key later invalidates every unspent credit, so do this once.
+It (and the worker at startup) refuses a key path inside a git work tree or under
+worker/, relay/, app/ or solver/; /opt/revolve/secrets is fine. If the worker
+cannot load the key it still starts, logs `!!! MINT UNAVAILABLE`, and answers
+`/mint/*` with 503 `mint_unavailable`. Replacing the key later invalidates every unspent credit, so do this once.
 
 ```bash
 cd /opt/revolve/worker && sudo -u revolve node src/mint-keygen.ts /opt/revolve/secrets/mint-key.pem
