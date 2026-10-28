@@ -8,7 +8,8 @@ export const MEMO_PROGRAM = "MemoSq4gqABAXKb96qnH8TysNcWxMyWCqXgDLGmfcHr";
 // hot wallet for blind-signed credits. The worker never trusts the app's word
 // for a transfer: it looks the transaction up and checks it against the quote.
 
-export type Verdict = "ok" | "pending" | "bad";
+/** `ok` carries the transfer's block time (unix seconds), so it can be priced as of when it landed. */
+export type Verdict = { ok: true; at: number } | "pending" | "bad";
 
 /** One chain's cash-in rail: where to pay, what a credit costs, and how a transfer is checked. */
 export interface CashinRail {
@@ -52,7 +53,7 @@ export function solanaRail(conn: Connection, payTo: string, perCredit: () => big
       // The hot wallet's own balance change: whatever instructions moved it, this is what arrived.
       const delta = BigInt(tx.meta.postBalances[i]!) - BigInt(tx.meta.preBalances[i]!);
       const t = tx.blockTime;
-      return delta >= min && t != null && t >= notBefore && t <= notAfter ? "ok" : "bad";
+      return delta >= min && t != null && t >= notBefore && t <= notAfter ? { ok: true, at: t } : "bad";
     },
   };
 }

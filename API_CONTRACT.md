@@ -61,7 +61,8 @@ Response 201:
 - `order_id`: random, base32, no sequence.
 - `deposit_ua`: Orchard-receiver-only unified address (payments land in Ironwood).
 - No IP, user agent or timestamps beyond expiry are stored.
-- Open orders still count against inventory, capped at 20 open orders; quotes last 15 minutes.
+- Only paid orders count against inventory: a quote reserves nothing until its payment is seen, so unpaid quotes can't lock up the hot wallet. Paid orders waiting to settle are capped at 20 (`MAX_OPEN_ORDERS`); unpaid quotes don't count. Quotes last 10 minutes.
+- Before a payout, the worker checks the quote against the price then. If the market moved against Revolve by more than 3% (`MAX_PRICE_MOVE_BPS`), the payout is re-priced at that rate, spread included; a move in the user's favour keeps the quote. Without a fresh price, the payout waits.
 
 ## Memo (built by the app, never by the server)
 
@@ -84,7 +85,7 @@ After `paid_out`, the server deletes the order to burner mapping and keeps only 
 
 Cancels an order nobody has paid yet. Allowed only while no payment note has been seen for it: status `awaiting_payment` (or `expired` without a payment).
 
-- 204, no body: cancelled. The record is deleted and the inventory it reserved is released; `GET` then answers 404. Only a hash of the order id is kept.
+- 204, no body: cancelled. The record is deleted (an unpaid quote holds no inventory); `GET` then answers 404. Only a hash of the order id is kept.
 - 409 `{"error":"payment_seen"}`: a payment has already been seen (`seen`, `confirmed`, `needs_review`, `paid_out`, or a credit-token order). The order is kept and processed as usual.
 - 404 `{"error":"not_found"}`: unknown, already cancelled, or paid out more than 15 minutes ago.
 

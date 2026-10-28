@@ -67,7 +67,13 @@ async function withMintApi(
     state: { free: bigint | null; price: boolean };
     db: ReturnType<typeof openDb>;
   }) => Promise<void>,
-  opts: { mint?: Mint | null; chains?: ("solana" | "base")[]; cashin?: ServerDeps["cashin"]; withdraw?: (db: ReturnType<typeof openDb>) => ServerDeps["withdraw"] } = {},
+  opts: {
+    mint?: Mint | null;
+    chains?: ("solana" | "base")[];
+    cashin?: ServerDeps["cashin"];
+    cashinPriceAt?: ServerDeps["cashinPriceAt"];
+    withdraw?: (db: ReturnType<typeof openDb>) => ServerDeps["withdraw"];
+  } = {},
 ) {
   const db = openDb(":memory:");
   const book = new OrderBook(db);
@@ -84,6 +90,7 @@ async function withMintApi(
     mint: opts.mint === undefined ? mint : opts.mint,
     chains: opts.chains,
     cashin: opts.cashin,
+    cashinPriceAt: opts.cashinPriceAt,
     withdraw: opts.withdraw?.(db),
     // Rate limits have their own test (hardening.test.ts); these tests make bursts of calls.
     limits: { write: new Bucket(1e9, 1e9), read: new Bucket(1e9, 1e9) },
@@ -432,9 +439,10 @@ test("DELETE /mint/orders/:id cancels an unpaid funding; 409 once a payment is s
     const del = (id: string) => fetch(`${base}/mint/orders/${id}`, { method: "DELETE" });
 
     const id = await create();
-    assert.equal(book.funds.openCount(), 1);
+    assert.equal(book.funds.unpaidCount(), 1);
+    assert.equal(book.funds.openCount(), 0, "unpaid, so it doesn't count toward the open cap");
     assert.equal((await del(id)).status, 204);
-    assert.equal(book.funds.openCount(), 0, "no longer counts toward the open cap");
+    assert.equal(book.funds.unpaidCount(), 0, "gone once cancelled");
     assert.equal((await fetch(`${base}/mint/orders/${id}`)).status, 404, "record deleted");
     assert.equal((await del(id)).status, 404);
     assert.equal((await del("rf_0000000000")).status, 404);
@@ -490,8 +498,8 @@ test("spend on Base: payout_wei to a checksummed address; bad chain, bad address
 
 const HOT = Keypair.generate().publicKey.toBase58();
 
-/** A cash-in rail whose chain is a table of transaction ids and verdicts; it records what it was asked. */
-function fakeRail(verdicts: Record<string, Verdict>) {
+/** A cash-in rail whose chain is a table of transaction ids and verdicts ("ok" landed just now); it records what it was asked. */
+function fakeRail(verdicts: Record<string, "ok" | "pending" | "bad">) {
   const asked: { tx: string; min: bigint; notBefore: number; notAfter: number; fundId: string }[] = [];
   const rail: CashinRail = {
     payTo: HOT,
@@ -499,7 +507,8 @@ function fakeRail(verdicts: Record<string, Verdict>) {
     normalizeTx: (tx) => (/^[a-z0-9]+$/.test(tx) ? tx : null),
     verify: async (tx, min, notBefore, notAfter, fundId) => {
       asked.push({ tx, min, notBefore, notAfter, fundId });
-      return verdicts[tx] ?? "pending";
+      const v = verdicts[tx] ?? "pending";
+      return v === "ok" ? ({ ok: true, at: Math.floor(Date.now() / 1000) } satisfies Verdict) : v;
     },
   };
   return { rail, asked };
@@ -717,6 +726,34 @@ test("a withdrawal accepted but not yet mined stays sending, address kept, until
 
   await runWithdrawals(book, payer, 10n ** 9n);
   assert.equal(payer.sends.at(-1)!.id, b.id, "then the next one pays");
+});
+
+test("cash-in: priced as of when the transfer landed; a stale quote is held for review, not minted", async () => {
+  const { rail } = fakeRail({ stale: "ok", fresh: "ok" });
+  // What a credit cost when each transfer landed; the quotes say 88,000.
+  const then = { perCredit: 91_000n as bigint | null };
+  await withMintApi(
+    async ({ base, book }) => {
+      const quote = async () => ((await (await json(base, "/cashins", { chain: "solana", credits: 2 })).json()) as { fund_id: string }).fund_id;
+      const sent = (id: string, tx: string) => json(base, `/cashins/${id}/sent`, { tx });
+
+      // The coin fell 3.4% against ZEC while the quote was open: held, the transfer used up.
+      const a = await quote();
+      const held = await sent(a, "stale");
+      assert.equal(held.status, 409);
+      assert.deepEqual(await held.json(), { error: "price_moved" });
+      assert.equal(book.funds.get(a)!.status, "needs_review");
+      assert.deepEqual(book.funds.reviewFunds().map((f) => f.review_reason), ["price_moved"]);
+      const b = await quote();
+      assert.deepEqual(await (await sent(b, "stale")).json(), { error: "tx_used" }, "it can't fund another cash-in either");
+
+      // Within 3% (2.3%), or no rate known for that moment: credited as quoted.
+      then.perCredit = 90_000n;
+      assert.equal((await sent(b, "fresh")).status, 200);
+      assert.equal(book.funds.get(b)!.status, "funded");
+    },
+    { cashin: { solana: rail }, cashinPriceAt: () => then.perCredit },
+  );
 });
 
 test("once minted, a funding forgets which Zcash note paid it; a re-emitted line for that note changes nothing", () =>
