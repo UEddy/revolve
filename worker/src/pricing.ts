@@ -48,6 +48,27 @@ export class Pricing {
     return (gross * BigInt(10_000 - this.spreadBps)) / 10_000n + this.gasAllowanceWei;
   }
 
+  /**
+   * What one credit (0.001 ZEC) costs on a cash-in, in lamports or wei: the
+   * spread works the other way from a payout, so Revolve never pays out more
+   * than it takes in. Null without a fresh price.
+   */
+  cashinPerCredit(chain: "solana" | "base", creditZat: bigint): bigint | null {
+    let perZec: bigint;
+    if (chain === "solana") {
+      if (this.fixed !== null) perZec = this.fixed;
+      else if (this.fresh()) perZec = BigInt(Math.floor(this.live!.lamportsPerZec));
+      else return null;
+    } else {
+      if (this.fixedWei !== null) perZec = this.fixedWei;
+      else if (this.fresh() && this.live!.weiPerZec !== null) perZec = BigInt(Math.floor(this.live!.weiPerZec));
+      else return null;
+    }
+    const num = creditZat * perZec * BigInt(10_000 + this.spreadBps);
+    const den = 100_000_000n * 10_000n;
+    return (num + den - 1n) / den;
+  }
+
   /** USD per ZEC for display only, e.g. "1224.50". Null if no fresh price. Never used for payouts. */
   indicativeUsdPerZec(): string | null {
     return this.fresh() ? this.live!.usdPerZec.toFixed(2) : null;

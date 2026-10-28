@@ -46,6 +46,17 @@ CREATE TABLE IF NOT EXISTS fund_orders (
 );
 -- SHA-256 of every spent token message, kept forever against double spends.
 CREATE TABLE IF NOT EXISTS spent_tokens (token_hash TEXT PRIMARY KEY);
+-- SHA-256 of every transaction a cash-in was funded with, so none funds twice.
+CREATE TABLE IF NOT EXISTS used_cashin_txs (tx_hash TEXT PRIMARY KEY);
+-- Credit withdrawals to shielded ZEC (v1.5). The address goes with the row once sent.
+CREATE TABLE IF NOT EXISTS withdrawals (
+  withdrawal_id TEXT PRIMARY KEY,
+  amount_zat INTEGER NOT NULL,
+  address TEXT NOT NULL,
+  pay_after INTEGER NOT NULL,
+  status TEXT NOT NULL,
+  spend_key TEXT UNIQUE NOT NULL
+);
 -- SHA-256 of cancelled order and funding ids, so a payment that still arrives
 -- for one is held for review as paid_after_cancel. Nothing else is kept.
 CREATE TABLE IF NOT EXISTS cancelled_ids (id_hash TEXT PRIMARY KEY);
@@ -78,5 +89,9 @@ export function openDb(path: string): DatabaseSync {
   db.exec("CREATE UNIQUE INDEX IF NOT EXISTS orders_spend_key ON orders (spend_key)");
   const fundCols = db.prepare("PRAGMA table_info(fund_orders)").all() as { name: string }[];
   if (!fundCols.some((c) => c.name === "blinded_hash")) db.exec("ALTER TABLE fund_orders ADD COLUMN blinded_hash TEXT");
+  // Cash-ins (v1.5): a funding paid in SOL or ETH instead of a ZEC note. `source`
+  // NULL means a ZEC funding; `pay_amount` is the quoted lamports or wei.
+  if (!fundCols.some((c) => c.name === "source")) db.exec("ALTER TABLE fund_orders ADD COLUMN source TEXT");
+  if (!fundCols.some((c) => c.name === "pay_amount")) db.exec("ALTER TABLE fund_orders ADD COLUMN pay_amount TEXT");
   return db;
 }

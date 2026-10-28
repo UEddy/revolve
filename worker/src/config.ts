@@ -22,6 +22,10 @@ export interface Config {
   /** PKCS#8 PEM of the credits mint key, outside any work tree and code folder (keypath.ts); empty or unloadable disables /mint. */
   mintKeyPath: string;
   mintKeyId: string;
+  /** The ZEC withdrawal hot wallet's env file for the payer-* commands (v1.5); empty leaves withdrawals off. */
+  zecPayerEnvFile: string;
+  /** The most withdrawn per UTC day, in zatoshis: bounds the loss from a forged or stolen credit. */
+  withdrawDailyCapZat: bigint;
   /** Base payouts (API_CONTRACT.md v1.4). An empty EVM_KEY_PATH leaves Base off: /limits doesn't offer it. */
   base: {
     rpcUrl: string;
@@ -60,6 +64,8 @@ export function loadConfig(): Config {
     maxOpenOrders: Number(opt("MAX_OPEN_ORDERS", "20")),
     mintKeyPath: opt("MINT_KEY_PATH", ""),
     mintKeyId: opt("MINT_KEY_ID", "k1"),
+    zecPayerEnvFile: opt("ZEC_PAYER_ENV_FILE", ""),
+    withdrawDailyCapZat: BigInt(opt("WITHDRAW_DAILY_CAP_ZAT", "50000000")),
     base: {
       rpcUrl: opt("BASE_RPC_URL", "https://mainnet.base.org"),
       keyPath: opt("EVM_KEY_PATH", ""),

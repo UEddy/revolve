@@ -1,0 +1,42 @@
+# Builds the watcher binary (deposit watcher and withdrawal payer) for the droplet,
+# which is too small to compile librustzcash itself, and publishes it on the
+# `watcher-latest` release with its SHA-256. The droplet downloads it (DEPLOY.md).
+name: watcher binary
+
+on:
+  push:
+    branches: [main]
+    paths: ["solver/**", ".github/workflows/watcher.yml"]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    # The droplet runs Ubuntu 24.04: same glibc.
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Rust
+        run: rustup toolchain install stable --profile minimal && rustup default stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: solver
+      - name: Test
+        working-directory: solver
+        run: cargo test --release --locked
+      - name: Build
+        working-directory: solver
+        run: cargo build --release --locked
+      - name: Publish
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          cd solver/target/release
+          sha256sum revolve-watcher > revolve-watcher.sha256
+          cat revolve-watcher.sha256
+          gh release view watcher-latest --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1 || \
+            gh release create watcher-latest --repo "$GITHUB_REPOSITORY" --prerelease \
+              --title "revolve-watcher (latest main)" --notes "Built by CI from main for Linux x86_64 (Ubuntu 24.04). See worker/deploy/DEPLOY.md."
+          gh release upload watcher-latest revolve-watcher revolve-watcher.sha256 --repo "$GITHUB_REPOSITORY" --clobber

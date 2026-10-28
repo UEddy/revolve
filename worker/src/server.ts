@@ -1,7 +1,9 @@
 import { createHash } from "node:crypto";
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import { isChain, isValidRecipient, payoutField, type Chain } from "./chains.ts";
-import { FUND_MAX_ZAT, isFundId } from "./funds.ts";
+import { CASHIN_GRACE_SECS, FUND_MAX_ZAT, isFundId } from "./funds.ts";
+import type { CashinRail } from "./cashin.ts";
+import { isWithdrawalId, looksLikeUa, type WithdrawBook, type ZecPayer } from "./withdrawals.ts";
 import { CREDIT_ZAT, TOKEN_MSG_BYTES, b64, type Mint } from "./mint.ts";
 import {
   BUCKETS,
@@ -31,6 +33,10 @@ export interface ServerDeps {
   chains?: Chain[];
   /** The credits mint, or null when no mint key is configured (the /mint routes then answer 503). */
   mint: Mint | null;
+  /** Cash-in rails per chain (v1.5); a chain without one can't cash in. */
+  cashin?: Partial<Record<Chain, CashinRail>>;
+  /** Withdrawals to shielded ZEC (v1.5); absent without a ZEC hot wallet. */
+  withdraw?: { book: WithdrawBook; payer: ZecPayer };
   /** Global request budgets (tests pass their own). */
   limits?: { write: Bucket; read: Bucket };
 }
@@ -94,6 +100,15 @@ export function createApi(deps: ServerDeps) {
       if (req.method === "GET" && path === "/buckets") return getBuckets(res, deps);
       if (req.method === "POST" && path === "/orders") return await postOrder(req, res, deps);
       if (req.method === "GET" && path === "/mint/key") return getMintKey(res, deps);
+      if (req.method === "POST" && path === "/cashins") return await postCashin(req, res, deps);
+      const ci = /^\/cashins\/([^/]+)\/sent$/.exec(path);
+      if (req.method === "POST" && ci) return isFundId(ci[1]!) ? await postCashinSent(req, res, deps, ci[1]!) : send(res, 404, { error: "not_found" });
+      if (req.method === "POST" && path === "/withdrawals") return await postWithdrawal(req, res, deps);
+      const wd = /^\/withdrawals\/([^/]+)$/.exec(path);
+      if (req.method === "GET" && wd) {
+        const w = isWithdrawalId(wd[1]!) ? deps.withdraw?.book.get(wd[1]!) : null;
+        return w ? send(res, 200, w) : send(res, 404, { error: "not_found" });
+      }
       if (req.method === "POST" && path === "/mint/orders") return await postFund(req, res, deps);
       const f = /^\/mint\/orders\/([^/]+)(\/sign)?$/.exec(path);
       if (f && isFundId(f[1])) {
@@ -177,7 +192,14 @@ function getLimits(res: ServerResponse, deps: ServerDeps) {
   const range = (chain: Chain) => ({ min_zec: zatToZec(MIN_ZAT), max_zec: zatToZec(maxZat(deps, chain)), step_zec: zatToZec(STEP_ZAT) });
   const chains: Record<string, unknown> = {};
   for (const c of deps.chains ?? ["solana"]) if (chainReady(deps, c)) chains[c] = range(c);
-  send(res, 200, { ...range("solana"), indicative_usd_per_zec: usd, chains });
+  const cashin: Record<string, unknown> = {};
+  if (deps.mint) {
+    for (const [c, rail] of Object.entries(deps.cashin ?? {})) {
+      const per = rail?.perCredit();
+      if (per != null) cashin[c] = { per_credit: per.toString() };
+    }
+  }
+  send(res, 200, { ...range("solana"), indicative_usd_per_zec: usd, chains, ...(Object.keys(cashin).length ? { cashin } : {}) });
 }
 
 function getBuckets(res: ServerResponse, deps: ServerDeps) {
@@ -278,6 +300,90 @@ function parseTokens(raw: unknown, kLen: number): { msg: Buffer; sig: Buffer }[]
     out.push({ msg, sig });
   }
   return out;
+}
+
+/** A cash-in quote (v1.5): a funding of `credits`, paid by a transfer on `chain`. */
+async function postCashin(req: IncomingMessage, res: ServerResponse, deps: ServerDeps) {
+  const body = await readJson(req, MAX_BODY);
+  if (body === null) return send(res, 400, { error: "invalid_json" });
+  const chain = chainOf(body);
+  if (chain === null) return send(res, 400, { error: "invalid_chain" });
+  const credits = body.credits;
+  if (typeof credits !== "number" || !Number.isInteger(credits) || credits < 1 || BigInt(credits) * CREDIT_ZAT > FUND_MAX_ZAT) {
+    return send(res, 400, { error: "invalid_amount" });
+  }
+  const rail = deps.cashin?.[chain];
+  const per = rail?.perCredit() ?? null;
+  if (!deps.mint || !rail || per === null) return send(res, 503, { error: "cashin_unavailable" });
+  if (deps.book.funds.openCount() >= deps.maxOpenOrders) return send(res, 503, { error: "busy" });
+  const pay = per * BigInt(credits);
+  const f = deps.book.funds.createCashin(chain, credits, pay, deps.quoteTtlSecs);
+  send(res, 201, {
+    fund_id: f.fund_id,
+    chain,
+    credits,
+    pay_to: rail.payTo,
+    [chain === "solana" ? "pay_lamports" : "pay_wei"]: pay.toString(),
+    expires_at: f.expires_at,
+  });
+}
+
+/** The app's report of its cash-in transfer, checked on chain before anything is minted. */
+async function postCashinSent(req: IncomingMessage, res: ServerResponse, deps: ServerDeps, fundId: string) {
+  const body = await readJson(req, MAX_BODY);
+  if (body === null) return send(res, 400, { error: "invalid_json" });
+  const q = deps.book.funds.cashinQuote(fundId);
+  if (!q) return send(res, 404, { error: "not_found" });
+  // A lost answer: the same report again finds it already funded.
+  if (q.status === "funded" || q.status === "minted") return send(res, 200, { status: q.status });
+  if (q.status !== "awaiting_payment") return send(res, 409, { error: "not_awaiting" });
+  const rail = deps.cashin?.[q.source as Chain];
+  if (!rail) return send(res, 503, { error: "cashin_unavailable" });
+  const tx = typeof body.tx === "string" ? rail.normalizeTx(body.tx) : null;
+  if (tx === null) return send(res, 400, { error: "bad_tx" });
+  const quotedAt = q.expiresAt - deps.quoteTtlSecs;
+  // The fund id in the transfer is what binds it to this quote; a minute of slack allows for block-time skew.
+  const verdict = await rail.verify(tx, q.payAmount, quotedAt - 60, q.expiresAt + CASHIN_GRACE_SECS, fundId);
+  if (verdict === "pending") return send(res, 202, { status: "pending" });
+  if (verdict === "bad") return send(res, 400, { error: "bad_tx" });
+  const r = deps.book.funds.fundCashin(fundId, sha256(Buffer.from(`${q.source}|${tx}`)));
+  if (r === "funded") return send(res, 200, { status: "funded" });
+  send(res, 409, { error: r });
+}
+
+/** Withdrawal margin for network fees: a few ZIP-317 actions each, kept free in the hot wallet. */
+const WITHDRAW_FEE_MARGIN_ZAT = 50_000n;
+
+/** Credits to shielded ZEC (v1.5): spent and queued in one transaction, paid later after a random delay. */
+async function postWithdrawal(req: IncomingMessage, res: ServerResponse, deps: ServerDeps) {
+  const w = deps.withdraw;
+  if (!deps.mint || !w) return send(res, 503, { error: "withdraw_unavailable" });
+  const body = await readJson(req, MAX_TOKEN_BODY);
+  if (body === null) return send(res, 400, { error: "invalid_json" });
+  const address = body.address;
+  if (typeof address !== "string" || !looksLikeUa(address) || !w.payer.checkAddress(address)) return send(res, 400, { error: "invalid_address" });
+  const tokens = parseTokens(body.tokens, deps.mint.kLen);
+  if (tokens === null) return send(res, 400, { error: "invalid_tokens" });
+  const hashes = tokens.map((t) => sha256(t.msg));
+  if (new Set(hashes).size !== hashes.length) return send(res, 400, { error: "invalid_tokens" });
+  for (const t of tokens) {
+    if (!(await deps.mint.verify(t.msg, t.sig))) return send(res, 400, { error: "invalid_tokens" });
+  }
+  const amountZat = BigInt(tokens.length) * CREDIT_ZAT;
+  const r = w.book.create({
+    tokenHashes: hashes,
+    spendKey: sha256(Buffer.from(`${[...hashes].sort().join(",")}|withdraw|${address}`)),
+    amountZat,
+    address,
+    fits: (zat) => {
+      const spendable = w.payer.cachedSpendable();
+      return spendable !== null && w.book.committed() + zat + WITHDRAW_FEE_MARGIN_ZAT <= spendable;
+    },
+  });
+  if (r.kind === "created" || r.kind === "retried") {
+    return send(res, 201, { withdrawal_id: r.id, amount_zec: zatToZec(r.amountZat), status: "queued" });
+  }
+  send(res, r.kind === "token_spent" ? 409 : 503, { error: r.kind });
 }
 
 function getMintKey(res: ServerResponse, deps: ServerDeps) {

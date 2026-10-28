@@ -56,6 +56,87 @@ export async function signFunding(fundId: string, blinded: string[]): Promise<st
   return r.signatures;
 }
 
+// ---- v1.5: cash out to credits, withdraw to shielded ZEC ----
+
+/** Demo rates for one credit (0.001 ZEC): about 12.4 SOL or 0.41 ETH per ZEC, spread included. */
+const MOCK_PER_CREDIT: Record<Chain, bigint> = { solana: 12_400_000n, base: 410_000_000_000_000n };
+
+/** Lamports or wei per credit, per chain, from GET /limits; a chain missing can't cash in right now. */
+export async function cashinRates(): Promise<Partial<Record<Chain, bigint>>> {
+  if (import.meta.env.DEV && ORDER_API === "mock") return { ...MOCK_PER_CREDIT };
+  const body = await call<{ cashin?: Record<string, { per_credit?: string } | undefined> }>("/limits");
+  const out: Partial<Record<Chain, bigint>> = {};
+  for (const c of ["solana", "base"] as const) {
+    const v = body.cashin?.[c]?.per_credit;
+    if (typeof v === "string" && /^[1-9]\d*$/.test(v)) out[c] = BigInt(v);
+  }
+  return out;
+}
+
+export type CashinQuote = { fund_id: string; chain: Chain; credits: number; pay_to: string; pay: bigint; expires_at: string };
+
+export async function createCashin(chain: Chain, credits: number): Promise<CashinQuote> {
+  if (import.meta.env.DEV && ORDER_API === "mock") return mintMock.cashin(chain, credits);
+  const r = await call<{ fund_id: string; chain: string; credits: number; pay_to: string; pay_lamports?: string; pay_wei?: string; expires_at: string }>("/cashins", {
+    method: "POST",
+    body: JSON.stringify({ chain, credits }),
+  });
+  const pay = chain === "solana" ? r.pay_lamports : r.pay_wei;
+  if (!ID.test(r.fund_id) || r.chain !== chain || r.credits !== credits || !pay || !/^[1-9]\d*$/.test(pay) || typeof r.pay_to !== "string") {
+    throw new OrderApiError("the mint sent a malformed cash-in quote", 502);
+  }
+  return { fund_id: r.fund_id, chain, credits, pay_to: r.pay_to, pay: BigInt(pay), expires_at: r.expires_at };
+}
+
+/** "funded" once the server has checked the transfer on chain; "pending" until it can see it. Throws on a refusal. */
+export async function reportCashin(fundId: string, tx: string): Promise<"funded" | "pending"> {
+  if (import.meta.env.DEV && ORDER_API === "mock") return mintMock.report(fundId);
+  try {
+    const r = await call<{ status?: string }>(`/cashins/${encodeURIComponent(fundId)}/sent`, { method: "POST", body: JSON.stringify({ tx }) });
+    if (r.status === "pending") return "pending";
+    if (r.status === "funded" || r.status === "minted") return "funded";
+    throw new OrderApiError("The order service sent a malformed answer", 502);
+  } catch (e) {
+    if (e instanceof OrderApiError && e.code && CASHIN_ERRORS[e.code]) throw new OrderApiError(CASHIN_ERRORS[e.code]!, e.status, e.code);
+    throw e;
+  }
+}
+
+const CASHIN_ERRORS: Record<string, string> = {
+  bad_tx: "Revolve couldn't match the transfer to this cash-in. It will be sorted out by hand.",
+  tx_used: "That transfer was already used for another cash-in.",
+  not_awaiting: "This cash-in is no longer open.",
+};
+
+export type WithdrawAnswer = { outcome: "queued"; id: string } | { outcome: "spent" | "return" | "keep"; message: string };
+
+/** POST /withdrawals. Never throws: every answer says what happens to the tokens (as for a spend). */
+export async function withdraw(tokens: CreditToken[], address: string): Promise<WithdrawAnswer> {
+  try {
+    const body = { tokens: tokens.map(({ msg, sig }) => ({ msg, sig })), address };
+    const r = import.meta.env.DEV && ORDER_API === "mock" ? await mintMock.withdraw(body) : await call<{ withdrawal_id: string }>("/withdrawals", { method: "POST", body: JSON.stringify(body) });
+    if (!/^rw_[0-9a-z]{10}$/.test(r.withdrawal_id)) return { outcome: "keep", message: "The order service sent a malformed answer" };
+    return { outcome: "queued", id: r.withdrawal_id };
+  } catch (e) {
+    if (!(e instanceof OrderApiError)) return { outcome: "keep", message: "No answer from Revolve. Retrying with the same credits." };
+    // Refused before anything was spent: the tokens go back. A spent token is never reused.
+    if (e.code === "invalid_address") return { outcome: "return", message: "That isn't a shielded Zcash address. Use a unified address (u1…) from Zodl's Receive screen." };
+    if (e.code === "withdraw_unavailable" || e.code === "mint_unavailable" || e.status === 429) return { outcome: "return", message: "Withdrawals can't be paid right now. Your credits are back in your balance; try again later." };
+    if (e.code === "token_spent" || e.code === "invalid_tokens") return { outcome: "spent", message: e.message };
+    return { outcome: "keep", message: e.message };
+  }
+}
+
+export async function getWithdrawal(id: string): Promise<{ status: "queued" | "sending" } | { status: "sent"; txid: string } | null> {
+  if (import.meta.env.DEV && ORDER_API === "mock") return mintMock.withdrawal(id);
+  try {
+    return await call(`/withdrawals/${encodeURIComponent(id)}`);
+  } catch (e) {
+    if (e instanceof OrderApiError && e.status === 404) return null;
+    throw e;
+  }
+}
+
 export type SpendResult = { outcome: "created"; orderId: string; payoutLamports: string } | { outcome: Exclude<SpendOutcome, "created">; message: string };
 
 /** POST /orders, spend form. Never throws: every answer maps to a SpendOutcome (credits.ts says what happens to the tokens). */
@@ -80,7 +161,7 @@ export async function spend(amountZec: string, tokens: CreditToken[], burner: st
 // ---- demo mode: a real blind-RSA mint with a throwaway key, in this tab only ----
 
 const MOCK_KEY = "revolve.mock.mint";
-type MockMint = { pub: JsonWebKey; priv: JsonWebKey; spki: string; fundings: Record<string, { amount: string; credits: number; created: number; minted: boolean; setKey?: string }>; spent: string[]; spends?: Record<string, { order_id: string; payout_lamports: string; payout_wei?: string }> };
+type MockMint = { pub: JsonWebKey; priv: JsonWebKey; spki: string; fundings: Record<string, { amount: string; credits: number; created: number; minted: boolean; setKey?: string; cashin?: { reported: boolean } }>; withdrawals?: Record<string, { created: number }>; spent: string[]; spends?: Record<string, { order_id: string; payout_lamports: string; payout_wei?: string }> };
 let mockCache: Promise<{ state: MockMint; priv: CryptoKey; pub: CryptoKey }> | null = null;
 
 const mintMock = {
@@ -130,6 +211,7 @@ const mintMock = {
     const f = (await mintMock.load()).state.fundings[fundId];
     if (!f) return null;
     if (f.minted) return { status: "minted" };
+    if (f.cashin) return { status: f.cashin.reported ? "funded" : "awaiting_payment" };
     const s = (Date.now() - f.created) / 1000;
     return { status: s < 15 ? "awaiting_payment" : s < 30 ? "seen" : "funded" };
   },
@@ -140,6 +222,44 @@ const mintMock = {
     delete state.fundings[fundId];
     mintMock.save(state);
     return "cancelled";
+  },
+  async cashin(chain: Chain, credits: number): Promise<CashinQuote> {
+    const q = orderMock.create((credits / 1000).toFixed(3));
+    const fundId = q.order_id.replace(/^rv_/, "rf_");
+    const { state } = await mintMock.load();
+    state.fundings[fundId] = { amount: (credits / 1000).toFixed(3), credits, created: Date.now(), minted: false, cashin: { reported: false } };
+    mintMock.save(state);
+    const payTo = chain === "solana" ? "DemoHotWa11et1111111111111111111111111111111" : "0x000000000000000000000000000000000000dEaD";
+    return { fund_id: fundId, chain, credits, pay_to: payTo, pay: MOCK_PER_CREDIT[chain] * BigInt(credits), expires_at: q.quote_expires_at };
+  },
+  async report(fundId: string): Promise<"funded"> {
+    const { state } = await mintMock.load();
+    const f = state.fundings[fundId];
+    if (!f?.cashin) throw new OrderApiError("Order not found", 404, "not_found");
+    f.cashin.reported = true;
+    mintMock.save(state);
+    return "funded";
+  },
+  async withdraw(body: { tokens: { msg: string; sig: string }[]; address: string }): Promise<{ withdrawal_id: string }> {
+    const { state, pub } = await mintMock.load();
+    if (!/^u1[02-9ac-hj-np-z]{60,}$/.test(body.address)) throw new OrderApiError("bad address", 400, "invalid_address");
+    const s = RSABSSA.SHA384.PSS.Randomized();
+    const hashes: string[] = [];
+    for (const t of body.tokens) {
+      if (!(await s.verify(pub, fromB64(t.sig), fromB64(t.msg)).catch(() => false))) throw new OrderApiError("Some credits were not accepted.", 400, "invalid_tokens");
+      hashes.push(b64(new Uint8Array(await crypto.subtle.digest("SHA-256", fromB64(t.msg) as Uint8Array<ArrayBuffer>))));
+    }
+    if (hashes.some((h) => state.spent.includes(h))) throw new OrderApiError("Some of these credits were already used.", 409, "token_spent");
+    state.spent.push(...hashes);
+    const id = "rw_" + Array.from(crypto.getRandomValues(new Uint8Array(10)), (b) => "0123456789abcdefghjkmnpqrstvwxyz"[b & 31]).join("");
+    (state.withdrawals ??= {})[id] = { created: Date.now() };
+    mintMock.save(state);
+    return { withdrawal_id: id };
+  },
+  async withdrawal(id: string): Promise<{ status: "queued" } | { status: "sent"; txid: string } | null> {
+    const w = (await mintMock.load()).state.withdrawals?.[id];
+    if (!w) return null;
+    return Date.now() - w.created < 30_000 ? { status: "queued" } : { status: "sent", txid: "d".repeat(64) };
   },
   async sign(fundId: string, blinded: string[]): Promise<{ signatures: string[] }> {
     const { state, priv } = await mintMock.load();
