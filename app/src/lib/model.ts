@@ -78,7 +78,13 @@ export type Position = {
    * back to Revolve for blind-signed credits, in one or more parts. Each part
    * becomes a cash-in funding (`fundId`) when its time comes.
    */
-  cashoutPlan?: { mode: "now" | "gradual"; createdAt: number; parts: { credits: number; at: number; fundId?: string; skipped?: true }[] };
+  cashoutPlan?: {
+    mode: "now" | "gradual";
+    createdAt: number;
+    parts: { credits: number; at: number; fundId?: string; skipped?: true }[];
+    /** Why the last due part didn't go out (it is retried); cleared once one does. */
+    lastError?: string;
+  };
 };
 
 // ---- credits (CREDITS_CONTRACT.md v1.3) ----

@@ -296,10 +296,12 @@ export function EngineProvider({ children }: { children: ReactNode }) {
           return;
         }
         const out = p.chain === "base" ? await sellBaseAll(p) : await sellAll(p);
+        // The wallet's cash after the sale, read from the chain (a closed position isn't in the balance rotation).
+        const cash = await (p.chain === "base" ? ethBalance(p.burner.pub) : lamports(p.burner.pub)).catch(() => null);
         await updatePosition(id, (x) => {
           x.stage = "closed";
           x.sale = { sig: out.sig, at: Date.now() };
-          x.balance = { lamports: x.balance?.lamports ?? "0", tokenRaw: "0", at: Date.now() };
+          x.balance = { lamports: cash?.toString() ?? x.balance?.lamports ?? "0", tokenRaw: "0", at: Date.now() };
         });
       } finally {
         inFlight.current.delete(id);
@@ -360,7 +362,15 @@ export function EngineProvider({ children }: { children: ReactNode }) {
   }, [!!data, price, basePrice, updatePosition]);
 
   const watchIds = positions
-    .filter((p) => p.stage === "held" || p.stage === "funded" || p.stage === "swap_failed" || (p.stage === "settling" && (p.order.status === "paid_out" || p.order.status === "gone")))
+    .filter(
+      (p) =>
+        p.stage === "held" ||
+        p.stage === "funded" ||
+        p.stage === "swap_failed" ||
+        (p.stage === "settling" && (p.order.status === "paid_out" || p.order.status === "gone")) ||
+        // A sold position still cashing out: its balance moves with each part.
+        (p.stage === "closed" && !!p.cashoutPlan?.parts.some((x) => !x.fundId && !x.skipped)),
+    )
     .map((p) => p.id)
     .join(",");
   useEffect(() => {
