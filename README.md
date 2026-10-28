@@ -6,7 +6,7 @@ Live app: **https://revolveapp-phi.vercel.app** (order API: `https://revolveapp.
 
 > **Trying it live: buys are small on purpose.** The largest buy is limited by how much SOL the payout hot wallet holds, after what open orders have already reserved. Right now that allows about **0.005 ZEC per buy** (the minimum is 0.002 ZEC, in steps of 0.001). The app's amount screen always shows the current maximum, and so does [`/limits`](https://revolveapp.duckdns.org/limits) (`max_zec`). Larger amounts are refused before you pay, never after.
 >
-> **Withdrawals are small on purpose too.** Credits are withdrawn to shielded ZEC from a separate withdrawal hot wallet that holds only a little ZEC, and 0.0005 ZEC of it is always kept back for network fees. So a withdrawal is capped by what that wallet holds at the time (right now about **0.004 ZEC**, i.e. 4 credits). A withdrawal it can't cover is refused before anything is spent, and the credits stay in your balance; try a smaller amount.
+> **Withdrawals are small on purpose too.** Credits are withdrawn to shielded ZEC from a separate withdrawal hot wallet that holds only a little ZEC, and 0.0005 ZEC of it is always kept back for network fees. So a withdrawal is capped by what that wallet holds at the time: a few credits at most while it's being tested, and it is topped up by hand. A withdrawal it can't cover is refused before anything is spent, and the credits stay in your balance; try a smaller amount.
 
 You pay from your shielded Zcash wallet (Zodl), and the asset lands in a brand-new wallet on the destination chain that holds that one position and nothing else. There are no accounts, no wallet connection, no gas to manage and no seed phrase: a passkey on your phone opens an encrypted vault that holds every position's key. Nothing on the Zcash side becomes public, and nothing on the destination side points back to you or to your other positions.
 
@@ -25,7 +25,7 @@ From one app on your phone you can:
 - **Buy any Solana token or tokenized stock with liquidity** (via Jupiter), paid in shielded ZEC. Live.
 - **Browse tokens on Base**: a hand-checked list, or any token by its contract address, with KyberSwap prices. Read only for now: buying is built end to end (ETH payout to a fresh Base wallet, the phone signs a KyberSwap buy) but switched off until its hot wallet is funded and tested.
 - **Browse** prediction markets (Polymarket) and NFT collections on Solana, Ethereum and Robinhood Chain. Live, read only: these cards say "Buying coming soon".
-- **Sell** a position to SOL (or ETH on Base) inside its own wallet, **send** it out, or **cash out privately**: the coin goes back to Revolve for blind-signed credits, at once or in random parts over hours, and you **withdraw** credits to your shielded Zcash address whenever you like. On Solana, Zodl's built-in Swap stays as a faster second route. Cashing out to credits has run on mainnet (see below); the first withdrawal is next.
+- **Sell** a position to SOL (or ETH on Base) inside its own wallet, **send** it out, or **cash out privately**: the coin goes back to Revolve for blind-signed credits, at once or in random parts over hours, and you **withdraw** credits to your shielded Zcash address whenever you like. On Solana, Zodl's built-in Swap stays as a faster second route. Cashing out to credits and withdrawing them to shielded ZEC have both run on mainnet (see below).
 
 No bridge UI, no chain selection, no wallet connection, no gas: each position's wallet gets a small SOL reserve with the payout, and the app signs everything on the device.
 
@@ -130,7 +130,7 @@ Stated plainly, so nobody has to dig for them:
 
 The deposit and the wrong-memo payment both show as fully shielded on the explorer (Orchard actions, no transparent inputs or outputs). The worker's database holds no record of the paid order any more, only a hash of the deposit note, which matches this deposit.
 
-### A full credits run: fund, mint, spend, buy, sell, cash out
+### A full credits run: fund, mint, spend, buy, sell, cash out, withdraw
 
 | Step | Transaction |
 |---|---|
@@ -141,9 +141,11 @@ The deposit and the wrong-memo payment both show as fully shielded on the explor
 | Buy on the device: that wallet bought PUMP | [`vXmK1Bry…vwTGikZZ`](https://solscan.io/tx/vXmK1Bry1zUPqEdSXftbd35HdmjcD5mWHkAgq8ojk2nqyeTfQt3NYv3xHPZzM4iXEM7adH5bVsRxxEhvwTGikZZ) |
 | Sell in the same wallet: PUMP back to SOL, nothing sent anywhere else | [`4i1Jyd4V…dak1bfhu`](https://solscan.io/tx/4i1Jyd4VtJrKRLydcnJj1gp9NZ9K9WVX5Fvk8JokqD28ynd9zcZrcTvG46HKi1728k4mKJPUnsEye3wzdak1bfhu) |
 | Cash out to credits: the SOL back to the shared hot wallet, the transfer naming its cash-in in a memo; credits blind-signed for it | [`2XRcrWG9…PDoL7fNA`](https://solscan.io/tx/2XRcrWG9RFCmh2PePjv5eqBvcQkG2HkGvCsf9kAPHBp9UVJRwJrMtJTbk4uFRPcm16jKkHTWAM47zM8fPDoL7fNA) |
-| **TODO (Eddy): withdraw credits to shielded ZEC** | **TODO: Zcash txid** |
+| Withdraw: 4 credits (0.004 ZEC) to a shielded Zodl address, paid after a random delay from the separate withdrawal hot wallet, Orchard only, with no outgoing viewing key | [`baed025d…c90c9057`](https://mainnet.zcashexplorer.app/transactions/baed025d924dd1bf40eeb817a03e4ebe32da3c9fe295f7f689aeb632c90c9057) |
 
 Only the phone holds that fresh wallet's key, and these four are everything it did on Solana: funded by the shared payout wallet, a buy, a sale, and a transfer back to that same shared wallet. Nothing in it points to the Zcash fundings, to Zodl, or to any other position.
+
+The withdrawal spends only Orchard notes and pays only an Orchard receiver, so nothing about it is public on Zcash either: not the amount, not the address. The credits it spent were blind-signed, so Revolve itself can't tell from the tokens whether they came from the fundings or from the cash-out, and the address was deleted from the server once it was paid.
 
 ## How Revolve differs from NEAR Intents
 
