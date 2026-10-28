@@ -9,7 +9,7 @@ import { BASE_RESERVE_WEI, NATIVE_ETH, checksummed, isEvmAddress, tokenMeta } fr
 import { kyberRoute } from "../lib/kyber.ts";
 import { zecToUsd, type Limits } from "../lib/amount.ts";
 import { usdPrice } from "../lib/jupiter.ts";
-import { ETH_MINT } from "../lib/config.ts";
+import { BASE_BUYING, ETH_MINT } from "../lib/config.ts";
 import { price, units } from "../lib/format.ts";
 import type { TokenRef } from "../lib/model.ts";
 import { go, href } from "../router.ts";
@@ -60,7 +60,9 @@ export function BaseList() {
   return (
     <>
       <p className="muted small" style={{ margin: "0 2px 12px" }}>
-        Paid in shielded ZEC like everything else. Each buy lands in a fresh Base wallet of its own, holding that one token and a little ETH for gas.
+        {BASE_BUYING
+          ? "Paid in shielded ZEC like everything else. Each buy lands in a fresh Base wallet of its own, holding that one token and a little ETH for gas."
+          : "Browse only for now: buying on Base is coming soon, paid in shielded ZEC like everything else, each buy in a fresh Base wallet of its own."}
       </p>
       <div className="list">
         {BASE_TOKENS.map((t) => (
@@ -132,7 +134,11 @@ export function BaseTokenScreen({ address }: { address: string }) {
         <p className="faint">Not on Revolve's list: check this is the contract you meant. Anyone can deploy a token with any name.</p>
       )}
       <div className="dock">
-        <button className="btn" onClick={() => setBuying(true)}>Buy {t.symbol}</button>
+        {BASE_BUYING ? (
+          <button className="btn" onClick={() => setBuying(true)}>Buy {t.symbol}</button>
+        ) : (
+          <button className="btn" disabled>Buying on Base: coming soon</button>
+        )}
       </div>
       <BuySheet open={buying} onClose={() => setBuying(false)} token={t} chain="base" estimate={baseEstimate(t)} />
     </div>

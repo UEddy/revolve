@@ -1,4 +1,4 @@
-import { randomBytes } from "node:crypto";
+import { createHash, randomBytes } from "node:crypto";
 import type { DatabaseSync } from "node:sqlite";
 import { CREDIT_ZAT } from "./mint.ts";
 import { REQUIRED_CONFS, cancelRow, wasCancelled, type CancelResult, type NoteLine } from "./orders.ts";
@@ -100,10 +100,23 @@ export class FundBook {
    * it was not `funded` (already minted, or never funded).
    */
   claimMinted(fundId: string, blindedHash: string): boolean {
-    const r = this.db
-      .prepare("UPDATE fund_orders SET status = 'minted', blinded_hash = ? WHERE fund_id = ? AND status = 'funded'")
-      .run(blindedHash, fundId);
-    return Number(r.changes) === 1;
+    this.db.exec("BEGIN IMMEDIATE");
+    try {
+      const row = this.row(fundId);
+      const r = this.db
+        .prepare("UPDATE fund_orders SET status = 'minted', blinded_hash = ?, note_key = NULL WHERE fund_id = ? AND status = 'funded'")
+        .run(blindedHash, fundId);
+      // Like a paid order: once minted, which Zcash note paid it is forgotten; only its
+      // hash stays, so a re-emitted watcher line for that note is ignored.
+      if (Number(r.changes) === 1 && row?.note_key) {
+        this.db.prepare("INSERT OR IGNORE INTO settled_notes VALUES (?)").run(createHash("sha256").update(row.note_key).digest("hex"));
+      }
+      this.db.exec("COMMIT");
+      return Number(r.changes) === 1;
+    } catch (e) {
+      if (this.db.isTransaction) this.db.exec("ROLLBACK");
+      throw e;
+    }
   }
 
   /** A cash-in (v1.5): a funding paid by a transfer of `payAmount` on `chain` instead of a ZEC note. */
