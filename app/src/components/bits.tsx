@@ -1,6 +1,7 @@
 // Small shared pieces: token icon, risk meter, warnings, sheet, top bar.
 
 import { useEffect, useState, type ReactNode } from "react";
+import { createPortal } from "react-dom";
 import { iconUrl } from "../lib/jupiter.ts";
 import type { Level, Warning } from "../lib/coach.ts";
 import { Back, Mark } from "./icons.tsx";
@@ -56,14 +57,18 @@ export function Sheet({ open, onClose, children }: { open: boolean; onClose: () 
     return () => removeEventListener("keydown", k);
   }, [open, onClose]);
   if (!open) return null;
-  return (
+  // Rendered on <body>: the screen's entry animation leaves a transform on
+  // .screen, which would pin a fixed sheet to the bottom of a long page
+  // instead of the bottom of the viewport.
+  return createPortal(
     <>
       <div className="scrim" onClick={onClose} />
       <div className="sheet" role="dialog" aria-modal="true">
         <div className="grab" />
         {children}
       </div>
-    </>
+    </>,
+    document.body,
   );
 }
 
