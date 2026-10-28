@@ -74,8 +74,8 @@ Why this design, and not the alternatives:
 
 Why there is a ZEC hot wallet on the server, and why that's acceptable:
 
-- Paying someone shielded ZEC needs a spending key; a view-only key can't. So withdrawals need one.
-- **It's a separate wallet, not the deposit address.** Its own seed, generated on the server, holding only what an operator moves into it. The deposit address's spending key stays off the server, as before, so deposits in flight are never at risk from it.
+- **A spending key is unavoidable.** Paying someone shielded ZEC needs a spending key; a view-only key can't. So withdrawals need one.
+- **It's a separate wallet, not the deposit address.** Its own seed, generated on the server, holding only what an operator moves into it. The deposit address's spending key stays off the server, so deposits in flight are never at risk from it.
 - **The loss is bounded.** A daily withdrawal cap (`WITHDRAW_DAILY_CAP_ZAT`) and its small balance limit what a leaked seed or a forged credit could take.
 - **A leaked seed doesn't reveal who was paid.** Withdrawals are built with no outgoing viewing key (`OvkPolicy::Discard`), so even the hot wallet's own keys can't list past recipients, and the server deletes each address once paid.
 - **It can't pay twice.** Each withdrawal's signed transaction is stored under its id before broadcast; a retry re-broadcasts the same bytes, whose notes can only be spent once.
@@ -138,6 +138,8 @@ Still open:
 
 ## Proven on mainnet
 
+### A single buy, paid straight from Zodl
+
 | Step | Transaction |
 |---|---|
 | Shielded deposit: 0.005 ZEC to the Orchard-only address, landed in Ironwood, block 3,531,565 | [`bef498e89249127a1fb93457305b3b447bb11e831f340fda42ff25c6da1d63fd`](https://mainnet.zcashexplorer.app/transactions/bef498e89249127a1fb93457305b3b447bb11e831f340fda42ff25c6da1d63fd) |
@@ -158,7 +160,7 @@ The deposit and the wrong-memo payment both show as fully shielded on the explor
 | Buy on the device: that wallet bought PUMP | [`vXmK1Bry…vwTGikZZ`](https://solscan.io/tx/vXmK1Bry1zUPqEdSXftbd35HdmjcD5mWHkAgq8ojk2nqyeTfQt3NYv3xHPZzM4iXEM7adH5bVsRxxEhvwTGikZZ) |
 | Sell in the same wallet: PUMP back to SOL, nothing sent anywhere else | [`4i1Jyd4V…dak1bfhu`](https://solscan.io/tx/4i1Jyd4VtJrKRLydcnJj1gp9NZ9K9WVX5Fvk8JokqD28ynd9zcZrcTvG46HKi1728k4mKJPUnsEye3wzdak1bfhu) |
 | Cash out to credits: the SOL back to the shared hot wallet, the transfer naming its cash-in in a memo; credits blind-signed for it | [`2XRcrWG9…PDoL7fNA`](https://solscan.io/tx/2XRcrWG9RFCmh2PePjv5eqBvcQkG2HkGvCsf9kAPHBp9UVJRwJrMtJTbk4uFRPcm16jKkHTWAM47zM8fPDoL7fNA) |
-| Withdraw: 4 credits (0.004 ZEC) to a shielded Zodl address, paid after a random delay from the separate withdrawal hot wallet, Orchard only, with no outgoing viewing key | [`baed025d…c90c9057`](https://mainnet.zcashexplorer.app/transactions/baed025d924dd1bf40eeb817a03e4ebe32da3c9fe295f7f689aeb632c90c9057) |
+| Withdraw: 4 credits (0.004 ZEC) to a shielded Zodl address, paid after a random delay from the separate withdrawal hot wallet, Orchard only, with no outgoing viewing key (Revolve covered the 0.0001 ZEC network fee then; it now comes out of the amount) | [`baed025d…c90c9057`](https://mainnet.zcashexplorer.app/transactions/baed025d924dd1bf40eeb817a03e4ebe32da3c9fe295f7f689aeb632c90c9057) |
 
 Only the phone holds that fresh wallet's key, and these four are everything it did on Solana: funded by the shared payout wallet, a buy, a sale, and a transfer back to that same shared wallet. Nothing in it points to the Zcash fundings, to Zodl, or to any other position.
 
@@ -259,7 +261,6 @@ Revolve's core stays the same for everything below: you pay in shielded ZEC, eve
 
 Long-lived positions like staking, lending and perps are easier to watch over time than one-off buys, so the privacy coach will extend to them: warnings on reusing a wallet across positions, topping up from a known wallet, or closing everything at once.
 
-
 ### Path to trustless
 
 Today Revolve is custodial at three points (see [Trust boundaries](#trust-boundaries)): it holds your ZEC between deposit and payout, it holds the ZEC behind credits until they're spent or withdrawn, and its hot wallets pay out. You trust Revolve not to keep the money and not to get hacked. The plan is to replace that trust with **atomic swaps**: the ZEC and the coin on the other chain change hands together or not at all, so neither Revolve nor anyone else can keep both.
@@ -330,7 +331,7 @@ On Zcash the address, amount and memo are all hidden anyway, so separate address
 There's nothing public on the Zcash side to match against: both the payment in and the withdrawal out are fully shielded. On Solana, amounts sit on a 0.001 ZEC grid, payouts wait 3 confirmations plus a random 2 to 6 blocks (or a random 60 to 300 seconds with credits), gradual cash-outs go in 3 to 6 random parts over 2 to 8 hours, withdrawals wait a random 20 to 120 minutes, and the coach warns before moves that would line up. See [Cashing out without a trail](#cashing-out-without-a-trail).
 
 **What can Revolve itself see?**
-IP addresses (never logged), public payouts and cash-in transfers, and withdrawal amounts and times. It can't link a spent or withdrawn credit to the funding or cash-out that minted it. While few people use Revolve, timing and amounts still narrow things down, and the README says so ([Trust boundaries](#trust-boundaries)).
+IP addresses (never logged), public payouts and cash-in transfers, and withdrawal amounts and times. It can't link a spent or withdrawn credit to the funding or cash-out that minted it. While few people use Revolve, timing and amounts still narrow things down, as [Trust boundaries](#trust-boundaries) states.
 
 **Can bad actors use it to launder money?**
 Not with outside money: Revolve only takes coins back from wallets it paid into, up to twice what it paid them, so stolen funds can't be turned into credits and private ZEC. Everything is capped per payment and per day. The remaining edge case is stated in [Abuse protections](#abuse-protections).
@@ -339,7 +340,7 @@ Not with outside money: Revolve only takes coins back from wallets it paid into,
 The deposit address's spending key isn't on it, so deposits are safe. The hot wallets are on it, but each holds little, has a daily cap, and withdrawals wait 20 to 120 minutes. A stolen mint key could forge credits, bounded by those same wallets and caps.
 
 **What if I lose my phone?**
-Settings → "Save encrypted backup" gives you a file that is useless without your passkey. On a new phone, "Restore from backup" with the same passkey (synced by Google Password Manager or iCloud Keychain) brings back every wallet and credit. Without a backup, they're gone: nothing is ever stored on a server.
+Settings → "Save encrypted backup" gives you a file that is useless without your passkey. On a new phone, "Restore from backup" with the same passkey (synced by Google Password Manager or iCloud Keychain) brings back the wallets and credits it was saved with, so save a fresh one after new buys. Without a backup, they're gone: nothing is ever stored on a server.
 
 **Why a web app (PWA) first?**
 It was the fastest way to reach both platforms at once: passkeys with the WebAuthn PRF extension work in Chrome on Android and Safari on iPhone, so the vault needs no account, seed phrase or install. Native apps for the App Store and Google Play are planned, on the same vault design. They also ease the web app's main trade-off, trusting the code the server serves on each visit, since store releases are signed, versioned builds; until then, reproducible, hash-pinned web builds address it ([Path to trustless](#path-to-trustless)).
