@@ -376,3 +376,9 @@ details summary { cursor: pointer; font-weight: 600; }
 /* ---------- cash out: route choice ---------- */
 .choice { display: flex; flex-direction: column; align-items: flex-start; gap: 6px; width: 100%; text-align: left; cursor: pointer; font: inherit; color: inherit; }
 .choice:active { background: var(--sunk); }
+
+/* ---------- history ---------- */
+.hrow { display: flex; flex-direction: column; gap: 4px; padding: 12px 14px; }
+.hrow .hash { gap: 8px; margin-top: 4px; }
+.hrow .hash .mono { font-size: 13px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+.hrow .hash .btn.small { min-height: 34px; padding: 0 12px; flex: none; }

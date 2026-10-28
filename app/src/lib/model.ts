@@ -52,9 +52,13 @@ export type Position = {
     status: OrderStatus | "gone";
     confirmations: number;
     payoutSig?: string;
+    /** When the app first saw the payout (for the history view). */
+    paidAt?: number;
   };
   stage: Stage;
   swap?: { sig?: string; inLamports?: string; outAmount?: string; at?: number; error?: string; attempts: number };
+  /** The sale back to SOL or ETH in this wallet. */
+  sale?: { sig: string; at: number };
   /** `lamports` is wei on Base. */
   balance?: { lamports: string; tokenRaw: string; at: number };
   /**
@@ -158,6 +162,8 @@ export type VaultData = {
   positions: Position[];
   /** Absent in vaults made before credits existed; read through creditsOf(). */
   credits?: Credits;
+  /** History cleared up to here (ms); older entries without a hash aren't shown again. */
+  historyClearedAt?: number;
 };
 
 export function emptyCredits(): Credits {

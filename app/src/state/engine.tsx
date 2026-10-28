@@ -170,7 +170,10 @@ export function EngineProvider({ children }: { children: ReactNode }) {
             p.stage = stageFor(p, s);
             p.order.status = s ? s.status : "gone";
             p.order.confirmations = s?.confirmations ?? p.order.confirmations;
-            if (s?.payout_signature) p.order.payoutSig = s.payout_signature;
+            if (s?.payout_signature && !p.order.payoutSig) {
+              p.order.payoutSig = s.payout_signature;
+              p.order.paidAt = Date.now();
+            }
           });
         } catch {
           // Network trouble: try again on the next turn.
@@ -292,10 +295,10 @@ export function EngineProvider({ children }: { children: ReactNode }) {
           });
           return;
         }
-        if (p.chain === "base") await sellBaseAll(p);
-        else await sellAll(p);
+        const out = p.chain === "base" ? await sellBaseAll(p) : await sellAll(p);
         await updatePosition(id, (x) => {
           x.stage = "closed";
+          x.sale = { sig: out.sig, at: Date.now() };
           x.balance = { lamports: x.balance?.lamports ?? "0", tokenRaw: "0", at: Date.now() };
         });
       } finally {
