@@ -6,6 +6,7 @@
 import { useEffect, useState } from "react";
 import { checkAmount, formatZec, zecToUsd, type AmountCheck, type Limits, type Unit } from "../lib/amount.ts";
 import { getLimits } from "../lib/orders.ts";
+import type { Chain } from "../lib/model.ts";
 import { usd } from "../lib/format.ts";
 import { Spinner } from "./bits.tsx";
 
@@ -22,7 +23,7 @@ const between = ([lo, hi]: [number, number]) => lo + Math.random() * (hi - lo);
  */
 export type LimitsPhase = { phase: "loading" } | { phase: "ready"; limits: Limits } | { phase: "error" };
 
-export function useLimits(open: boolean): [LimitsPhase, () => void] {
+export function useLimits(open: boolean, chain: Chain = "solana"): [LimitsPhase, () => void] {
   const [state, setState] = useState<LimitsPhase>({ phase: "loading" });
   const [nonce, setNonce] = useState(0);
   useEffect(() => {
@@ -30,7 +31,7 @@ export function useLimits(open: boolean): [LimitsPhase, () => void] {
     let live = true;
     let timer: ReturnType<typeof setTimeout> | undefined;
     const ask = () =>
-      getLimits().then(
+      getLimits(chain).then(
         (r) => {
           if (!live) return;
           if (r.loading) {
@@ -52,7 +53,7 @@ export function useLimits(open: boolean): [LimitsPhase, () => void] {
       live = false;
       clearTimeout(timer);
     };
-  }, [open, nonce]);
+  }, [open, nonce, chain]);
   useEffect(() => {
     if (!open) setState({ phase: "loading" });
   }, [open]);

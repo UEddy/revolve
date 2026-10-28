@@ -22,6 +22,18 @@ export interface Config {
   /** PKCS#8 PEM of the credits mint key, outside any work tree and code folder (keypath.ts); empty or unloadable disables /mint. */
   mintKeyPath: string;
   mintKeyId: string;
+  /** Base payouts (API_CONTRACT.md v1.4). An empty EVM_KEY_PATH leaves Base off: /limits doesn't offer it. */
+  base: {
+    rpcUrl: string;
+    /** Hex private key file of the EVM hot wallet, outside any work tree and code folder (keypath.ts). */
+    keyPath: string;
+    reserveWei: bigint;
+    hotWalletCapWei: bigint;
+    dailyPayoutCapWei: bigint;
+    /** Added to every Base payout: the fresh wallet's gas for its buy and a later sale. */
+    gasAllowanceWei: bigint;
+    weiPerZec: bigint | null;
+  };
 }
 
 export function loadConfig(): Config {
@@ -48,6 +60,15 @@ export function loadConfig(): Config {
     maxOpenOrders: Number(opt("MAX_OPEN_ORDERS", "20")),
     mintKeyPath: opt("MINT_KEY_PATH", ""),
     mintKeyId: opt("MINT_KEY_ID", "k1"),
+    base: {
+      rpcUrl: opt("BASE_RPC_URL", "https://mainnet.base.org"),
+      keyPath: opt("EVM_KEY_PATH", ""),
+      reserveWei: BigInt(opt("BASE_RESERVE_WEI", "200000000000000")),
+      hotWalletCapWei: BigInt(opt("BASE_HOT_WALLET_CAP_WEI", "100000000000000000")),
+      dailyPayoutCapWei: BigInt(opt("BASE_DAILY_PAYOUT_CAP_WEI", "100000000000000000")),
+      gasAllowanceWei: BigInt(opt("BASE_GAS_ALLOWANCE_WEI", "30000000000000")),
+      weiPerZec: opt("WEI_PER_ZEC", "") === "" ? null : BigInt(opt("WEI_PER_ZEC", "")),
+    },
   };
 }
 

@@ -21,6 +21,10 @@ export type RelayEnv = {
   NFT_COLLECTIONS?: string;
   /** OpenSea API key for the Ethereum and Robinhood Chain NFT feeds; without it those feeds answer 503. */
   OPENSEA_API_KEY?: string;
+  /** Base JSON-RPC for Base positions (API_CONTRACT.md v1.4). */
+  BASE_RPC_URL?: string;
+  /** KyberSwap aggregator base URL (tests point it elsewhere). */
+  KYBER_API_BASE?: string;
 };
 
 // Read-only Discover feeds: one fixed upstream each, never shaped by the client.
@@ -71,6 +75,25 @@ const DEFAULT_RPC = "https://api.mainnet-beta.solana.com";
 const DEFAULT_JUP = "https://lite-api.jup.ag";
 const MAX_BODY = 64 * 1024;
 const MAX_IMAGE = 1024 * 1024;
+
+const DEFAULT_BASE_RPC = "https://mainnet.base.org";
+const DEFAULT_KYBER = "https://aggregator-api.kyberswap.com";
+
+/** What a Base wallet on the phone needs: balances, fees, nonces, sending and receipts. No logs, filters or traces. */
+const BASE_RPC_METHODS = new Set([
+  "eth_chainId",
+  "eth_blockNumber",
+  "eth_getBalance",
+  "eth_call",
+  "eth_getTransactionCount",
+  "eth_estimateGas",
+  "eth_gasPrice",
+  "eth_maxPriorityFeePerGas",
+  "eth_feeHistory",
+  "eth_getBlockByNumber",
+  "eth_sendRawTransaction",
+  "eth_getTransactionReceipt",
+]);
 
 const RPC_METHODS = new Set([
   "getBalance",
@@ -223,6 +246,75 @@ export async function handleRpc(req: Request, env: RelayEnv, state: RelayState):
   return new Response(upstream.body, {
     status: upstream.status,
     headers: { "content-type": "application/json", "cache-control": "no-store" },
+  });
+}
+
+/** One Base JSON-RPC call, same rules as Solana's: allowlisted methods, no batches, nothing about the client. */
+export async function handleBaseRpc(req: Request, env: RelayEnv, state: RelayState): Promise<Response> {
+  if (req.method !== "POST") return json(405, { error: "POST only" });
+  const text = await readBody(req);
+  if (text === null) return json(413, { error: "body too large" });
+  let call: { jsonrpc?: unknown; id?: unknown; method?: unknown; params?: unknown };
+  try {
+    call = JSON.parse(text);
+  } catch {
+    return json(400, { error: "not JSON" });
+  }
+  if (Array.isArray(call)) return json(400, { error: "one call per request" });
+  if (call.jsonrpc !== "2.0" || typeof call.method !== "string" || !BASE_RPC_METHODS.has(call.method)) {
+    return json(400, { error: "method not allowed" });
+  }
+  if (!state.limits.rpc.take()) return busy();
+  const upstream = await fetch(env.BASE_RPC_URL || DEFAULT_BASE_RPC, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ jsonrpc: "2.0", id: call.id ?? 1, method: call.method, params: call.params ?? [] }),
+    signal: AbortSignal.timeout(15_000),
+  });
+  return new Response(upstream.body, {
+    status: upstream.status,
+    headers: { "content-type": "application/json", "cache-control": "no-store" },
+  });
+}
+
+const EVM_ADDRESS = /^0x[0-9a-fA-F]{40}$/;
+
+/**
+ * KyberSwap on Base, two calls only: a route quote (GET, three validated
+ * parameters and nothing else, so a client can't add identifying ones) and
+ * building that route into a transaction (POST, body passed as is). Never cached.
+ */
+export async function handleKyber(req: Request, env: RelayEnv, state: RelayState): Promise<Response> {
+  const url = new URL(req.url);
+  const path = url.searchParams.get("path");
+  const base = `${(env.KYBER_API_BASE || DEFAULT_KYBER).replace(/\/$/, "")}/base/api/v1`;
+  const headers: Record<string, string> = { accept: "application/json", "x-client-id": "revolve" };
+  let target: string;
+  let body: string | undefined;
+  if (path === "routes") {
+    if (req.method !== "GET") return json(405, { error: "GET only" });
+    const tokenIn = url.searchParams.get("tokenIn") ?? "";
+    const tokenOut = url.searchParams.get("tokenOut") ?? "";
+    const amountIn = url.searchParams.get("amountIn") ?? "";
+    if (!EVM_ADDRESS.test(tokenIn) || !EVM_ADDRESS.test(tokenOut) || !/^[1-9]\d{0,77}$/.test(amountIn)) {
+      return json(400, { error: "bad route parameters" });
+    }
+    target = `${base}/routes?${new URLSearchParams({ tokenIn, tokenOut, amountIn })}`;
+  } else if (path === "route/build") {
+    if (req.method !== "POST") return json(405, { error: "POST only" });
+    const text = await readBody(req);
+    if (text === null) return json(413, { error: "body too large" });
+    body = text;
+    headers["content-type"] = "application/json";
+    target = `${base}/route/build`;
+  } else {
+    return json(404, { error: "path not allowed" });
+  }
+  if (!state.limits.jup.take()) return busy();
+  const upstream = await fetch(target, { method: req.method, headers, body, signal: AbortSignal.timeout(20_000) });
+  return new Response(upstream.body, {
+    status: upstream.status,
+    headers: { "content-type": upstream.headers.get("content-type") ?? "application/json", "cache-control": "no-store" },
   });
 }
 
@@ -512,6 +604,8 @@ export function createRelay(env: RelayEnv, state: RelayState = newState(), prefi
       try {
         if (route === "/rpc") res = await handleRpc(req, env, state);
         else if (route === "/jup") res = await handleJup(req, env, state);
+        else if (route === "/base-rpc") res = await handleBaseRpc(req, env, state);
+        else if (route === "/kyber") res = await handleKyber(req, env, state);
         else if (route === "/img") res = await handleImg(req, state);
         else if (route === "/feeds/markets") res = await handleFeed(req, env, state, "markets");
         else if (route === "/feeds/nfts") res = await handleFeed(req, env, state, "nfts");

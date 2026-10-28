@@ -8,6 +8,7 @@ import { Welcome, Unlock } from "./screens/Gate.tsx";
 import { Home } from "./screens/Home.tsx";
 import { Discover } from "./screens/Discover.tsx";
 import { TokenScreen } from "./screens/Token.tsx";
+import { BaseScreen, BaseTokenScreen } from "./screens/Base.tsx";
 import { PositionScreen } from "./screens/Position.tsx";
 import { Settings } from "./screens/Settings.tsx";
 import { Compass, Gear, Wallet } from "./components/icons.tsx";
@@ -47,6 +48,8 @@ function Screens() {
       {route.name === "funding" && <FundingScreen key={route.id} id={route.id} />}
       {route.name === "market" && <MarketScreen key={route.id} id={route.id} />}
       {route.name === "nft" && <NftScreen key={route.symbol} symbol={route.symbol} />}
+      {route.name === "base" && <BaseScreen />}
+      {route.name === "baseToken" && <BaseTokenScreen key={route.address} address={route.address} />}
       {(route.name === "home" || route.name === "discover" || route.name === "settings") && (
         <>
           <Tabs at={route.name} />

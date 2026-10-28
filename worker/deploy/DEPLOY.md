@@ -113,6 +113,24 @@ ls -l /opt/revolve/secrets/mint-key.pem                   # -rw------- revolve r
 grep -E '^MINT_KEY_(PATH|ID)=' /opt/revolve/worker/.env  # both set (stage.sh writes them)
 ```
 
+## D5c [droplet] Base hot wallet (optional)
+
+Base payouts (API_CONTRACT.md v1.4) need one EVM key, generated on the droplet
+as `revolve` like the mint key, with the same path rules. Without it, or if it
+can't be loaded, the worker logs `!!! BASE UNAVAILABLE` and runs Solana only;
+`/limits` then has no `base` entry and the app shows Base as unavailable.
+
+```bash
+cd /opt/revolve/worker && sudo -u revolve node src/evm-keygen.ts /opt/revolve/secrets/evm-hotwallet.key   # prints the address
+ls -l /opt/revolve/secrets/evm-hotwallet.key              # -rw------- revolve revolve
+grep -E '^(EVM_KEY_PATH|BASE_)' /opt/revolve/worker/.env  # stage.sh writes these
+```
+
+Send ETH **on Base** to the printed address. Base inventory is
+min(balance, `BASE_HOT_WALLET_CAP_WEI`) less `BASE_RESERVE_WEI` (0.0002 ETH by
+default, for payout gas). Each payout adds `BASE_GAS_ALLOWANCE_WEI` (0.00003 ETH)
+for the fresh wallet's own swap gas.
+
 ## D6 [droplet] Start the services
 
 ```bash
@@ -160,6 +178,6 @@ journalctl -u caddy -u revolve-worker -u revolve-relay --since today | grep -v '
 
 - Review items: `cd /opt/revolve/worker && sudo -u revolve node src/admin.ts list`
   (and `pay-out ...`, see `src/admin.ts`). Run from an SSH shell only.
-- Update code: rerun D4's `git archive` line, then `systemctl restart revolve-worker revolve-relay`.
+- Update code: rerun D4's `git archive` line, run D5's two `npm ci` lines if a `package-lock.json` changed, then `systemctl restart revolve-worker revolve-relay`.
 - Update the watcher: rebuild locally, `scp` the binary (D4), `systemctl restart revolve-worker`.
 - Roll back Caddy: `cp /etc/caddy/Caddyfile.floorfight.bak /etc/caddy/Caddyfile && systemctl reload caddy`.

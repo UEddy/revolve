@@ -59,6 +59,13 @@ export function freeInventory(
   return (wallet < today ? wallet : today) - book.committedLamports();
 }
 
+/** The same rule for any chain, in its own units: min(balance, cap) - reserve, never above today's cap, less what open orders hold. */
+export function freeOnChain(balance: bigint, committed: bigint, paidToday: bigint, cfg: { reserve: bigint; cap: bigint; dailyCap: bigint }): bigint {
+  const wallet = (balance < cfg.cap ? balance : cfg.cap) - cfg.reserve;
+  const today = cfg.dailyCap - paidToday;
+  return (wallet < today ? wallet : today) - committed;
+}
+
 export async function runPayouts(book: OrderBook, payer: Payer, limits: PayoutLimits, onlyOrderId?: string): Promise<void> {
   const { reserve, dailyCap } = limits;
   await reconcile(book, payer);

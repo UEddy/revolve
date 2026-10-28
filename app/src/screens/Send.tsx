@@ -8,6 +8,9 @@ import { sendWarnings } from "../lib/coach.ts";
 import { isSolanaPubkey } from "../lib/memo.ts";
 import { lamports } from "../lib/solana.ts";
 import { sendAllCash, sendAllToken } from "../lib/transfer.ts";
+import { sendAllBaseEth, sendAllBaseToken } from "../lib/baseswap.ts";
+import { checksummed, isEvmAddress } from "../lib/evm.ts";
+import { cashOf } from "../lib/chain.ts";
 import type { Position } from "../lib/model.ts";
 import { Sheet, Spinner, Warnings, errorText } from "../components/bits.tsx";
 
@@ -26,19 +29,27 @@ export function SendSheet({ open, onClose, p }: { open: boolean; onClose: () => 
     }
   }, [open]);
 
-  const valid = isSolanaPubkey(to.trim());
-  const self = to.trim() === p.burner.pub;
-  const warnings = valid && !self ? sendWarnings(p, to.trim(), data?.positions ?? []) : [];
+  const base = p.chain === "base";
+  const valid = base ? isEvmAddress(to.trim()) : isSolanaPubkey(to.trim());
+  // Base addresses are compared in their checksummed form, as the vault stores them.
+  const dest = valid && base ? checksummed(to.trim()) : to.trim();
+  const self = dest === p.burner.pub;
+  const warnings = valid && !self ? sendWarnings(p, dest, data?.positions ?? []) : [];
   const high = warnings.some((w) => w.level === "high");
 
   const send = async () => {
     setBusy(true);
     setError(null);
     try {
-      const dest = to.trim();
       if (p.demo) throw new Error("Demo positions hold no real funds");
       await confirm();
-      const sig = what === "asset" ? await sendAllToken(p.burner, p.token.mint, dest) : await sendAllCash(p.burner, dest, await lamports(p.burner.pub));
+      const sig = base
+        ? what === "asset"
+          ? await sendAllBaseToken(p, dest)
+          : await sendAllBaseEth(p, dest)
+        : what === "asset"
+          ? await sendAllToken(p.burner, p.token.mint, dest)
+          : await sendAllCash(p.burner, dest, await lamports(p.burner.pub));
       await updatePosition(p.id, (x) => {
         x.sends.push({ to: dest, at: Date.now(), sig, what });
         if (what === "asset") x.stage = "closed";
@@ -56,11 +67,11 @@ export function SendSheet({ open, onClose, p }: { open: boolean; onClose: () => 
       <h3 className="display" style={{ fontSize: 20 }}>Send out</h3>
       <div className="seg" role="group">
         <button aria-pressed={what === "asset"} onClick={() => setWhat("asset")}>All {p.token.symbol}</button>
-        <button aria-pressed={what === "cash"} onClick={() => setWhat("cash")}>Leftover cash</button>
+        <button aria-pressed={what === "cash"} onClick={() => setWhat("cash")}>Leftover {cashOf(p).symbol}</button>
       </div>
       <input
         className="input"
-        placeholder="Destination address"
+        placeholder={base ? "Destination address on Base (0x…)" : "Destination address"}
         value={to}
         onChange={(e) => {
           setTo(e.target.value);

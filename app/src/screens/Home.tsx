@@ -4,7 +4,8 @@
 import { useVault } from "../state/vault.tsx";
 import { useEngine } from "../state/engine.tsx";
 import { positionRisk } from "../lib/coach.ts";
-import { SOL_MINT, ZEC_MINT } from "../lib/config.ts";
+import { ZEC_MINT } from "../lib/config.ts";
+import { cashOf } from "../lib/chain.ts";
 import { amount, usd, units, ago } from "../lib/format.ts";
 import type { Funding, Position } from "../lib/model.ts";
 import { useCredits } from "../state/credits.tsx";
@@ -27,8 +28,8 @@ const PENDING_TEXT: Partial<Record<Position["stage"], string>> = {
 function value(p: Position, prices: Record<string, number>): { asset: number | null; cash: number } {
   const held = units(p.balance?.tokenRaw ?? p.swap?.outAmount, p.token.decimals);
   const px = prices[p.token.mint];
-  const solPx = prices[SOL_MINT] ?? 0;
-  return { asset: px === undefined ? null : held * px, cash: units(p.balance?.lamports, 9) * solPx };
+  const c = cashOf(p);
+  return { asset: px === undefined ? null : held * px, cash: units(p.balance?.lamports, c.decimals) * (prices[c.mint] ?? 0) };
 }
 
 const FUNDING_TEXT: Partial<Record<Funding["status"], string>> = {
