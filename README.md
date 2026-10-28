@@ -188,7 +188,7 @@ There's nothing public on the Zcash side to match against: both the payment in a
 **What can Revolve itself see?**
 IP addresses (never logged), public payouts and cash-in transfers, and withdrawal amounts and times. It can't link a spent or withdrawn credit to the funding or cash-out that minted it. While few people use Revolve, timing and amounts still narrow things down, and the README says so ([Trust boundaries](#trust-boundaries)).
 
-**Can criminals use it to launder money?**
+**Can bad actors use it to launder money?**
 Not with outside money: Revolve only takes coins back from wallets it paid into, up to twice what it paid them, so stolen funds can't be turned into credits and private ZEC. Everything is capped per payment and per day. The remaining edge case is stated in [Abuse protections](#abuse-protections).
 
 **What if your server is hacked?**
