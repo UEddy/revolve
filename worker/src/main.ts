@@ -121,6 +121,7 @@ createApi({
   spreadBps: pricing.spreadBps,
   cashinPriceAt: (chain, at) => pricing.cashinPerCreditAt(chain, CREDIT_ZAT, at),
   maxPriceMoveBps: cfg.maxPriceMoveBps,
+  cashinMaxMultiple: cfg.cashinMaxMultiple,
   mint,
   chains: basePayer ? ["solana", "base"] : ["solana"],
   cashin: {

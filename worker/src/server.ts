@@ -35,6 +35,8 @@ export interface ServerDeps {
   cashinPriceAt?: (chain: Chain, atSecs: number) => bigint | null;
   /** How far the market may move against Revolve before a quote stops binding (default MAX_PRICE_MOVE_BPS). */
   maxPriceMoveBps?: number;
+  /** A wallet may send back at most this many times what Revolve paid into it (default 2). */
+  cashinMaxMultiple?: number;
   /** Payout units free to promise to new orders on a chain, or null if unknown. */
   freeInventory: (chain: Chain) => bigint | null;
   /** Chains with a configured hot wallet (default: Solana only). Others answer chain_unavailable. */
@@ -372,7 +374,19 @@ async function postCashinSent(req: IncomingMessage, res: ServerResponse, deps: S
     const held = deps.book.funds.holdCashin(fundId, txKey, "price_moved");
     return send(res, 409, { error: held === "held" ? "price_moved" : held });
   }
-  const r = deps.book.funds.fundCashin(fundId, txKey);
+  // Only a wallet Revolve paid into may cash in, and only up to a multiple of what it was paid:
+  // otherwise outside money could be turned into credits and withdrawn as private ZEC.
+  const chain = q.source as Chain;
+  if (!deps.book.funds.fundedWallet(chain, verdict.from) && rail.firstFunding) {
+    const first = await rail.firstFunding(verdict.from).catch(() => null);
+    if (first !== null) deps.book.funds.addFunding(chain, verdict.from, first);
+  }
+  const from = { chain, address: verdict.from, amount: verdict.amount, maxMultiple: deps.cashinMaxMultiple ?? 2 };
+  const r = deps.book.funds.fundCashin(fundId, txKey, from);
+  if (r === "outside_funds") {
+    const held = deps.book.funds.holdCashin(fundId, txKey, "outside_funds");
+    return send(res, 409, { error: held === "held" ? "outside_funds" : held });
+  }
   if (r === "funded") return send(res, 200, { status: "funded" });
   send(res, 409, { error: r });
 }

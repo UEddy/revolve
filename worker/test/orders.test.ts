@@ -245,3 +245,13 @@ test("a due payout can be re-priced before it is claimed, never after", () => {
   assert.equal(book.inFlight().length, 1);
   assert.equal(book.committedLamports(), 57_000_000n, "in flight at the re-priced amount");
 });
+
+test("a payout records what Revolve paid into the wallet, for the cash-in rule; the order itself is still deleted", () => {
+  const { book } = setup();
+  const o = book.create(500_000n, 60_000_000n, 600);
+  book.onNote(note(`rv1|${o.order_id}|${burner}`, 500_000, 20));
+  book.markPaying(o.order_id, "sig", 1);
+  book.markPaid(o.order_id, "sig");
+  assert.deepEqual(book.funds.fundedWallet("solana", burner), { paidIn: 60_000_000n, returned: 0n });
+  assert.equal(book.funds.fundedWallet("solana", Keypair.generate().publicKey.toBase58()), null);
+});

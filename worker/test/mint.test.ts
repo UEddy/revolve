@@ -498,8 +498,16 @@ test("spend on Base: payout_wei to a checksummed address; bad chain, bad address
 
 const HOT = Keypair.generate().publicKey.toBase58();
 
-/** A cash-in rail whose chain is a table of transaction ids and verdicts ("ok" landed just now); it records what it was asked. */
-function fakeRail(verdicts: Record<string, "ok" | "pending" | "bad">) {
+/** The wallet the fake rail's transfers come from. */
+const FROM = Keypair.generate().publicKey.toBase58();
+
+/**
+ * A cash-in rail whose chain is a table of transaction ids and verdicts ("ok":
+ * the quoted amount landed just now, from FROM); it records what it was asked.
+ * `firstFunding` answers for wallets Revolve paid before it kept a record;
+ * by default it says Revolve paid FROM plenty.
+ */
+function fakeRail(verdicts: Record<string, "ok" | "pending" | "bad">, firstFunding: (a: string) => bigint | null = () => 10n ** 12n) {
   const asked: { tx: string; min: bigint; notBefore: number; notAfter: number; fundId: string }[] = [];
   const rail: CashinRail = {
     payTo: HOT,
@@ -508,8 +516,9 @@ function fakeRail(verdicts: Record<string, "ok" | "pending" | "bad">) {
     verify: async (tx, min, notBefore, notAfter, fundId) => {
       asked.push({ tx, min, notBefore, notAfter, fundId });
       const v = verdicts[tx] ?? "pending";
-      return v === "ok" ? ({ ok: true, at: Math.floor(Date.now() / 1000) } satisfies Verdict) : v;
+      return v === "ok" ? ({ ok: true, at: Math.floor(Date.now() / 1000), from: FROM, amount: min } satisfies Verdict) : v;
     },
+    firstFunding: async (a) => firstFunding(a),
   };
   return { rail, asked };
 }
@@ -753,6 +762,47 @@ test("cash-in: priced as of when the transfer landed; a stale quote is held for 
       assert.equal(book.funds.get(b)!.status, "funded");
     },
     { cashin: { solana: rail }, cashinPriceAt: () => then.perCredit },
+  );
+});
+
+test("cash-in: only from a wallet Revolve paid into, and at most twice what it paid in", async () => {
+  // No record and no Revolve payout on chain: an outside wallet.
+  const { rail } = fakeRail({ t0: "ok", t1: "ok", t2: "ok", t3: "ok" }, () => null);
+  await withMintApi(
+    async ({ base, book }) => {
+      const quote = async () => ((await (await json(base, "/cashins", { chain: "solana", credits: 2 })).json()) as { fund_id: string }).fund_id;
+      const sent = (id: string, tx: string) => json(base, `/cashins/${id}/sent`, { tx });
+
+      const outside = await quote();
+      const held = await sent(outside, "t0");
+      assert.equal(held.status, 409);
+      assert.deepEqual(await held.json(), { error: "outside_funds" });
+      assert.equal(book.funds.get(outside)!.status, "needs_review", "held, to be refunded by hand");
+      assert.deepEqual(await (await sent(await quote(), "t0")).json(), { error: "tx_used" });
+
+      // Revolve paid this wallet 200,000 lamports; each cash-in here returns 176,000.
+      book.funds.addFunding("solana", FROM, 200_000n);
+      assert.equal((await sent(await quote(), "t1")).status, 200, "176,000 back: fine");
+      assert.equal((await sent(await quote(), "t2")).status, 200, "352,000 back: within twice 200,000, e.g. a winning trade");
+      const third = await sent(await quote(), "t3");
+      assert.deepEqual(await third.json(), { error: "outside_funds" }, "528,000 back: more than Revolve could have paid in plus gains");
+      assert.deepEqual(book.funds.fundedWallet("solana", FROM), { paidIn: 200_000n, returned: 352_000n });
+    },
+    { cashin: { solana: rail } },
+  );
+});
+
+test("a wallet paid before the record existed is found by its first transaction, Revolve's payout", async () => {
+  const asked: string[] = [];
+  const { rail } = fakeRail({ ok1: "ok" }, (a) => (asked.push(a), 300_000n));
+  await withMintApi(
+    async ({ base, book }) => {
+      const id = ((await (await json(base, "/cashins", { chain: "solana", credits: 2 })).json()) as { fund_id: string }).fund_id;
+      assert.equal((await json(base, `/cashins/${id}/sent`, { tx: "ok1" })).status, 200);
+      assert.deepEqual(asked, [FROM]);
+      assert.deepEqual(book.funds.fundedWallet("solana", FROM), { paidIn: 300_000n, returned: 176_000n }, "and recorded from then on");
+    },
+    { cashin: { solana: rail } },
   );
 });
 
