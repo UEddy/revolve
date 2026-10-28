@@ -6,6 +6,8 @@
 import { useEffect, useState } from "react";
 import { useCredits, SpendRefused } from "../state/credits.tsx";
 import { withdrawWarnings } from "../lib/coach.ts";
+import { formatZec } from "../lib/amount.ts";
+import { WITHDRAW_FEE_ZATS } from "../lib/credits.ts";
 import { Sheet, Spinner, Warnings, errorText } from "../components/bits.tsx";
 
 /** A mainnet unified address; the server's own decoder makes the final call (it must carry an Orchard receiver). */
@@ -62,8 +64,8 @@ export function WithdrawSheet({ open, onClose }: { open: boolean; onClose: () =>
       ) : (
         <>
           <p className="faint small" style={{ marginTop: 0 }}>
-            Credits are blind-signed: Revolve can't tell which funding or cash-out they came from. The ZEC arrives fully shielded; Revolve pays the
-            network fee.
+            Credits are blind-signed: Revolve can't tell which funding or cash-out they came from. The ZEC arrives fully shielded, less the{" "}
+            {formatZec(WITHDRAW_FEE_ZATS)} ZEC network fee.
           </p>
           <label className="field-label" htmlFor="wd-amt">Credits to withdraw (1 credit = 0.001 ZEC)</label>
           <div className="row">
@@ -71,7 +73,12 @@ export function WithdrawSheet({ open, onClose }: { open: boolean; onClose: () =>
             <button className="btn small ghost" onClick={() => setAmount(String(balance))} disabled={balance === 0}>All</button>
           </div>
           {amount && !validAmount && <p className="err">Enter a whole number of credits, from 1 to {balance}.</p>}
-          {validAmount && <p className="faint small">{(n! / 1000).toFixed(3)} ZEC</p>}
+          {validAmount && (
+            <p className="faint small">
+              You receive {formatZec(BigInt(n!) * 100_000n - WITHDRAW_FEE_ZATS)} ZEC ({formatZec(BigInt(n!) * 100_000n)} less the{" "}
+              {formatZec(WITHDRAW_FEE_ZATS)} network fee)
+            </p>
+          )}
 
           <label className="field-label" htmlFor="wd-to">Your shielded address</label>
           <input id="wd-to" className="input" value={address} onChange={(e) => setAddress(e.target.value)} autoCapitalize="off" autoCorrect="off" spellCheck={false} placeholder="u1… from Zodl's Receive screen" />

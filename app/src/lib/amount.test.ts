@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { checkAmount, formatZec, parseLimits, parseZec, roundToStep, usdToZats, zecToUsd, type Limits } from "./amount.ts";
+import { afterSpread, checkAmount, formatZec, parseLimits, parseZec, roundToStep, usdToZats, zecToUsd, type Limits } from "./amount.ts";
 import { amountNote } from "./coach.ts";
 
 const limits: Limits = parseLimits({ min_zec: "0.002", max_zec: "0.007", step_zec: "0.001", indicative_usd_per_zec: "1224.50" });
@@ -60,4 +60,14 @@ test("the large-amount note is gentle and only fires near the max", () => {
   assert.equal(amountNote(z("0.035"), roomy)?.level, "low"); // exactly 70%
   // A small max makes every amount "near the max"; no note then.
   assert.equal(amountNote(z("0.007"), limits), null);
+});
+
+test("limits carry the spread for estimates; an older worker that doesn't say means the default 1.5%", () => {
+  const body = { min_zec: "0.002", max_zec: "0.007", step_zec: "0.001", indicative_usd_per_zec: "1224.50" };
+  assert.equal(parseLimits(body).spreadBps, 150);
+  const l = parseLimits({ ...body, spread_bps: 200 });
+  assert.equal(l.spreadBps, 200);
+  assert.equal(afterSpread(100, l), 98);
+  assert.equal(parseLimits({ ...body, spread_bps: 200, chains: { base: { min_zec: "0.002", max_zec: "0.004", step_zec: "0.001" } } }, "base").spreadBps, 200);
+  assert.equal(parseLimits({ ...body, spread_bps: "200" }).spreadBps, 150, "only a whole number is taken");
 });

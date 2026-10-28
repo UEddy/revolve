@@ -13,6 +13,11 @@ export const WITHDRAW_DELAY_SECS: [number, number] = [20 * 60, 120 * 60];
 const SENT_CACHE_MS = 24 * 3600 * 1000;
 /** After a failed send, the next try waits this long (the payer is idempotent per id, so retrying is safe). */
 const RETRY_SECS = 5 * 60;
+/**
+ * The network fee taken out of every withdrawal: what a typical one pays under
+ * ZIP-317 (0.00005 ZEC per action, at least two). 1 credit withdraws 0.0009 ZEC.
+ */
+export const WITHDRAW_FEE_ZAT = 10_000n;
 /** Confirmations before a withdrawal counts as sent and its address is forgotten (as for deposits). */
 export const WITHDRAW_CONFS = 3;
 /** A broadcast withdrawal is looked at again this often until it has its confirmations (a block is ~75 s). */
