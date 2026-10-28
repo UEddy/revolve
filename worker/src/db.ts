@@ -49,7 +49,7 @@ CREATE TABLE IF NOT EXISTS fund_orders (
 CREATE TABLE IF NOT EXISTS spent_tokens (token_hash TEXT PRIMARY KEY);
 -- SHA-256 of every transaction a cash-in was funded with, so none funds twice.
 CREATE TABLE IF NOT EXISTS used_cashin_txs (tx_hash TEXT PRIMARY KEY);
--- Credit withdrawals to shielded ZEC (v1.5). The address goes with the row once sent.
+-- Credit withdrawals to shielded ZEC (v1.5). The address goes with the row once mined.
 CREATE TABLE IF NOT EXISTS withdrawals (
   withdrawal_id TEXT PRIMARY KEY,
   amount_zat INTEGER NOT NULL,
@@ -94,6 +94,9 @@ export function openDb(path: string): DatabaseSync {
   // NULL means a ZEC funding; `pay_amount` is the quoted lamports or wei.
   if (!fundCols.some((c) => c.name === "source")) db.exec("ALTER TABLE fund_orders ADD COLUMN source TEXT");
   if (!fundCols.some((c) => c.name === "pay_amount")) db.exec("ALTER TABLE fund_orders ADD COLUMN pay_amount TEXT");
+  // A withdrawal waits for its transaction to be mined before it is deleted; this is the one it waits on.
+  const withdrawCols = db.prepare("PRAGMA table_info(withdrawals)").all() as { name: string }[];
+  if (!withdrawCols.some((c) => c.name === "txid")) db.exec("ALTER TABLE withdrawals ADD COLUMN txid TEXT");
   // Fundings minted before minting forgot their note: forget it now, keeping only its hash.
   const minted = db.prepare("SELECT fund_id, note_key FROM fund_orders WHERE status = 'minted' AND note_key IS NOT NULL").all() as { fund_id: string; note_key: string }[];
   for (const m of minted) {

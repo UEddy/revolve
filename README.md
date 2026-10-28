@@ -62,7 +62,7 @@ Getting back to shielded ZEC is where privacy usually breaks, so the default exi
 
 1. **Cash in.** The position's SOL (or ETH on Base) goes back to Revolve's hot wallet, the same one every user's payouts come from. The transfer names its cash-in (a memo on Solana, input data on Base), so nobody else can claim it. The app reports it; the worker looks it up on chain itself (it succeeded, names this cash-in, paid at least the quoted amount, inside the quote's window, never used before) and only then signs credits for it, blind, exactly as for a ZEC funding.
 2. **Gradually, if you choose.** The cash-out is split into 3 to 6 parts of random sizes, sent at random times over 2 to 8 hours, so neither the amounts nor the times line up with the sale, or with each other.
-3. **Withdraw.** Later, you spend credits to a shielded address (a unified address with an Orchard receiver; transparent addresses are refused). The worker pays after a random 20 to 120 minutes, one withdrawal at a time, from a separate ZEC hot wallet, and then deletes the address.
+3. **Withdraw.** Later, you spend credits to a shielded address (a unified address with an Orchard receiver; transparent addresses are refused). The worker pays after a random 20 to 120 minutes, one withdrawal at a time, from a separate ZEC hot wallet, and deletes the address once the payment is mined.
 
 Why this design, and not the alternatives:
 
@@ -79,6 +79,7 @@ Why a ZEC hot wallet is on the server now, and why it's acceptable:
 - **The loss is bounded.** A daily withdrawal cap (`WITHDRAW_DAILY_CAP_ZAT`) and its small balance limit what a leaked seed or a forged credit could take.
 - **A leaked seed doesn't reveal who was paid.** Withdrawals are built with no outgoing viewing key (`OvkPolicy::Discard`), so even the hot wallet's own keys can't list past recipients, and the server deletes each address once paid.
 - **It can't pay twice.** Each withdrawal's signed transaction is stored under its id before broadcast; a retry re-broadcasts the same bytes, whose notes can only be spent once.
+- **Accepted isn't paid.** A withdrawal stays open until its transaction has 3 confirmations, re-broadcast meanwhile. If one ever expires unmined, it is replaced only once it is well past its expiry height, when the old one can no longer be mined.
 
 ## Why it does not leak
 
