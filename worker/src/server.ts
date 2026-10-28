@@ -3,10 +3,12 @@ import { createServer, type IncomingMessage, type ServerResponse } from "node:ht
 import { isChain, isValidRecipient, payoutField, type Chain } from "./chains.ts";
 import { CASHIN_GRACE_SECS, FUND_MAX_ZAT, isFundId } from "./funds.ts";
 import type { CashinRail } from "./cashin.ts";
+import { MAX_PRICE_MOVE_BPS, exceedsBy } from "./pricing.ts";
 import { WITHDRAW_FEE_ZAT, isWithdrawalId, looksLikeUa, type WithdrawBook, type ZecPayer } from "./withdrawals.ts";
 import { CREDIT_ZAT, TOKEN_MSG_BYTES, b64, type Mint } from "./mint.ts";
 import {
   BUCKETS,
+  MAX_UNPAID_QUOTES,
   MIN_ZAT,
   STEP_ZAT,
   isOrderId,
@@ -29,6 +31,10 @@ export interface ServerDeps {
   usdPerZec: () => string | null;
   /** The spread taken from every payout, in basis points, for the app's estimates (default 150). */
   spreadBps?: number;
+  /** What one credit cost on a chain at a moment (unix seconds), from the rates seen then; null if unknown. */
+  cashinPriceAt?: (chain: Chain, atSecs: number) => bigint | null;
+  /** How far the market may move against Revolve before a quote stops binding (default MAX_PRICE_MOVE_BPS). */
+  maxPriceMoveBps?: number;
   /** Payout units free to promise to new orders on a chain, or null if unknown. */
   freeInventory: (chain: Chain) => bigint | null;
   /** Chains with a configured hot wallet (default: Solana only). Others answer chain_unavailable. */
@@ -236,7 +242,7 @@ async function postOrder(req: IncomingMessage, res: ServerResponse, deps: Server
   const chain = legacy ? "solana" : chainOf(body);
   if (chain === null) return send(res, 400, { error: "invalid_chain" });
   if (chain !== "solana" && !chainReady(deps, chain)) return send(res, 503, { error: "chain_unavailable" });
-  if (deps.book.openCount() >= deps.maxOpenOrders) return send(res, 503, { error: "busy" });
+  if (deps.book.openCount() >= deps.maxOpenOrders || deps.book.unpaidCount() >= MAX_UNPAID_QUOTES) return send(res, 503, { error: "busy" });
 
   if (deps.quote(amountZat, chain) === null) return send(res, 503, { error: "no_price" });
   // Payouts grow with the amount, so this is exactly "above the current max_zec".
@@ -310,6 +316,9 @@ function parseTokens(raw: unknown, kLen: number): { msg: Buffer; sig: Buffer }[]
   return out;
 }
 
+/** Paid fundings still confirming hit MAX_OPEN_ORDERS; unpaid quotes only the table bound. */
+const fundsBusy = (deps: ServerDeps) => deps.book.funds.openCount() >= deps.maxOpenOrders || deps.book.funds.unpaidCount() >= MAX_UNPAID_QUOTES;
+
 /** A cash-in quote (v1.5): a funding of `credits`, paid by a transfer on `chain`. */
 async function postCashin(req: IncomingMessage, res: ServerResponse, deps: ServerDeps) {
   const body = await readJson(req, MAX_BODY);
@@ -323,7 +332,7 @@ async function postCashin(req: IncomingMessage, res: ServerResponse, deps: Serve
   const rail = deps.cashin?.[chain];
   const per = rail?.perCredit() ?? null;
   if (!deps.mint || !rail || per === null) return send(res, 503, { error: "cashin_unavailable" });
-  if (deps.book.funds.openCount() >= deps.maxOpenOrders) return send(res, 503, { error: "busy" });
+  if (fundsBusy(deps)) return send(res, 503, { error: "busy" });
   const pay = per * BigInt(credits);
   const f = deps.book.funds.createCashin(chain, credits, pay, deps.quoteTtlSecs);
   send(res, 201, {
@@ -354,7 +363,16 @@ async function postCashinSent(req: IncomingMessage, res: ServerResponse, deps: S
   const verdict = await rail.verify(tx, q.payAmount, quotedAt - 60, q.expiresAt + CASHIN_GRACE_SECS, fundId);
   if (verdict === "pending") return send(res, 202, { status: "pending" });
   if (verdict === "bad") return send(res, 400, { error: "bad_tx" });
-  const r = deps.book.funds.fundCashin(fundId, sha256(Buffer.from(`${q.source}|${tx}`)));
+  const txKey = sha256(Buffer.from(`${q.source}|${tx}`));
+  // Priced as of when the transfer landed: if the coin had fallen against ZEC by more
+  // than the allowed move since the quote, the quote was stale, so it is held, not minted.
+  const credits = q.amountZat / CREDIT_ZAT;
+  const perCreditThen = deps.cashinPriceAt?.(q.source as Chain, verdict.at) ?? null;
+  if (perCreditThen !== null && exceedsBy(perCreditThen * credits, q.payAmount, deps.maxPriceMoveBps ?? MAX_PRICE_MOVE_BPS)) {
+    const held = deps.book.funds.holdCashin(fundId, txKey, "price_moved");
+    return send(res, 409, { error: held === "held" ? "price_moved" : held });
+  }
+  const r = deps.book.funds.fundCashin(fundId, txKey);
   if (r === "funded") return send(res, 200, { status: "funded" });
   send(res, 409, { error: r });
 }
@@ -412,7 +430,7 @@ async function postFund(req: IncomingMessage, res: ServerResponse, deps: ServerD
   if (amountZat === null || !onGrid(amountZat) || amountZat > FUND_MAX_ZAT) {
     return send(res, 400, { error: "invalid_amount" });
   }
-  if (deps.book.funds.openCount() >= deps.maxOpenOrders) return send(res, 503, { error: "busy" });
+  if (fundsBusy(deps)) return send(res, 503, { error: "busy" });
   const f = deps.book.funds.create(amountZat, deps.quoteTtlSecs);
   send(res, 201, {
     fund_id: f.fund_id,

@@ -4,7 +4,7 @@
 
 Live app: **https://revolveapp-phi.vercel.app** (order API: `https://revolveapp.duckdns.org`)
 
-> **Trying it live: buys are small on purpose.** The largest buy is limited by how much SOL the payout hot wallet holds, after what open orders have already reserved. Right now that allows about **0.005 ZEC per buy** (the minimum is 0.002 ZEC, in steps of 0.001). The app's amount screen always shows the current maximum, and so does [`/limits`](https://revolveapp.duckdns.org/limits) (`max_zec`). Larger amounts are refused before you pay, never after.
+> **Trying it live: buys are small on purpose.** The largest buy is limited by how much SOL the payout hot wallet holds, after what paid orders waiting for their payout already hold. Right now that allows about **0.005 ZEC per buy** (the minimum is 0.002 ZEC, in steps of 0.001). The app's amount screen always shows the current maximum, and so does [`/limits`](https://revolveapp.duckdns.org/limits) (`max_zec`). Larger amounts are refused before you pay. A quote reserves nothing until you pay, so if several people pay at once for more than the wallet holds, a payout waits until it's topped up.
 >
 > **Withdrawals are small on purpose too.** Credits are withdrawn to shielded ZEC from a separate withdrawal hot wallet that holds only a little ZEC, and 0.0005 ZEC of it is always kept back for network fees. So a withdrawal is capped by what that wallet holds at the time: a few credits at most while it's being tested, and it is topped up by hand. A withdrawal it can't cover is refused before anything is spent, and the credits stay in your balance; try a smaller amount.
 
@@ -119,6 +119,23 @@ Stated plainly, so nobody has to dig for them:
 - **The mint key is a hot key.** If it leaked, an attacker could forge credits and claim payouts. The loss is bounded by what sits in the capped hot wallet.
 - **Refunds are manual.** A payment that doesn't match an open order exactly is held for review and refunded by hand: a wrong amount, a malformed or unknown memo, a payment after the quote expired, or a second payment to the same order.
 
+## Abuse protections
+
+How Revolve keeps people from gaming it, and what is still open:
+
+- **Stale quotes can't be picked off.** Quotes last 10 minutes. Before paying out, the worker checks the quote against the price at that moment. If the market moved against Revolve by more than 3% (`MAX_PRICE_MOVE_BPS`), the payout is re-priced at the current rate; a move in your favour keeps the quote. Without a fresh price, payouts wait. A cash-in is priced as of the moment its transfer landed, from the rates the worker saw then; past a 3% move it is held for review and refunded by hand.
+- **Quotes can't lock up the hot wallet.** A quote reserves nothing until its payment is seen, and unpaid quotes don't count toward the cap of 20 open orders, so spamming quotes blocks nobody. Expired unpaid quotes are deleted after a day.
+- **Hot wallets are bounded.** Small balances, a cap on each wallet and daily payout caps (Solana, Base, withdrawals). The deposit address's spending key isn't on the server, and withdrawals go one at a time after a random 20 to 120 minutes.
+- **Nothing pays twice.** Spent credits are remembered by hash forever, every payout is stored before it is broadcast and settled by looking it up, and a cash-in transaction can fund only once.
+- **A clone can't open your vault.** Passkeys only work on the real site, and the app runs only its own code and talks only to the servers it lists.
+- **Rate limits** on the order API and the relay, which forwards allowlisted calls only.
+
+Not covered yet:
+
+- Cash-ins are accepted from any wallet, not only ones Revolve funded, so the caps (0.05 ZEC per part, the daily withdrawal cap) are what bound misuse of that path.
+- The rate limits are global, by design: Revolve keeps no per-user state, so a flood of requests slows everyone down rather than one client.
+- The code and hosting accounts (GitHub, Vercel, DigitalOcean) are only as safe as their logins: two-factor authentication on all of them is part of running Revolve.
+
 ## Proven on mainnet
 
 | Step | Transaction |
@@ -165,7 +182,7 @@ Revolve earns the way an exchange desk does: a spread on the conversions it perf
 | Funding credits | Nothing: at par, 1 credit = 0.001 ZEC |
 | Withdrawing credits | Nothing: at par, less the 0.0001 ZEC network fee, which comes out of the amount (1 credit withdraws 0.0009 ZEC) |
 
-A full round trip (ZEC to a token and back to shielded ZEC) costs the user about 3% plus network fees. The spread also absorbs the price moving while a quote is open (up to 15 minutes).
+A full round trip (ZEC to a token and back to shielded ZEC) costs the user about 3% plus network fees. The spread also absorbs the price moving while a quote is open (10 minutes); past a 3% move against Revolve, the payout is re-priced at the current rate (see [Abuse protections](#abuse-protections)).
 
 ### One buy, end to end (Solana)
 

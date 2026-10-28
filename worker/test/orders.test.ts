@@ -71,7 +71,7 @@ test("happy path: seen, confirmed, delayed payout, then mapping deleted", () => 
 
   book.onNote(note(memo, 1_000_000, 9));
   const due = book.due();
-  assert.deepEqual(due, [{ orderId: o.order_id, burner, lamports: 123n }]);
+  assert.deepEqual(due, [{ orderId: o.order_id, burner, lamports: 123n, amountZat: 1_000_000n }]);
 
   book.markPaying(o.order_id, "sig1", 100);
   assert.equal(book.get(o.order_id)!.status, "confirmed");
@@ -179,7 +179,7 @@ test("bind a review note to an expired order's quote, pay once", () => {
   const id = book.bindReviewNote(key, burner, { orderId: o.order_id });
   assert.equal(id, o.order_id);
   assert.deepEqual(book.reviewNotes(), []);
-  assert.deepEqual(book.due(), [{ orderId: o.order_id, burner, lamports: 65_000_000n }]);
+  assert.deepEqual(book.due(), [{ orderId: o.order_id, burner, lamports: 65_000_000n, amountZat: 500_000n }]);
   assert.throws(() => book.bindReviewNote(key, burner, { lamports: 1n }), /no such review note/);
 
   // The re-emitted line now belongs to the order and is not reviewed again.
@@ -205,5 +205,43 @@ test("bind with explicit lamports creates an internal order", () => {
   const { book } = setup();
   book.onNote(note("Love", 50_000, 5));
   const id = book.bindReviewNote(book.reviewNotes()[0].note_key, burner, { lamports: 7n });
-  assert.deepEqual(book.due(), [{ orderId: id, burner, lamports: 7n }]);
+  assert.deepEqual(book.due(), [{ orderId: id, burner, lamports: 7n, amountZat: 50_000n }]);
+});
+
+test("unpaid quotes hold no inventory and don't count toward the open cap; a seen payment does", () => {
+  const { book } = setup();
+  const quotes = Array.from({ length: 25 }, () => book.create(500_000n, 60_000_000n, 600));
+  assert.equal(book.unpaidCount(), 25);
+  assert.equal(book.openCount(), 0, "25 unpaid quotes: nobody is locked out");
+  assert.equal(book.committedLamports(), 0n, "and no SOL is reserved for them");
+  book.onNote(note(`rv1|${quotes[0]!.order_id}|${burner}`, 500_000, 0));
+  assert.equal(book.openCount(), 1);
+  assert.equal(book.committedLamports(), 60_000_000n, "reserved once paid");
+});
+
+test("expired, never-paid quotes are deleted after a day; a payment that still arrives goes to review", () => {
+  const { book, advance } = setup();
+  const o = book.create(500_000n, 60_000_000n, 600);
+  const f = book.funds.create(300_000n, 600);
+  advance(601_000);
+  book.expire();
+  assert.equal(book.get(o.order_id)!.status, "expired", "kept a while");
+  advance(24 * 3600_000);
+  book.expire();
+  assert.equal(book.get(o.order_id), null, "then deleted");
+  assert.equal(book.funds.get(f.fund_id), null, "fundings too");
+  book.onNote(note(`rv1|${o.order_id}|${burner}`, 500_000, 3));
+  assert.deepEqual(book.reviewNotes().map((n) => n.reason), ["unknown_order"]);
+});
+
+test("a due payout can be re-priced before it is claimed, never after", () => {
+  const { book } = setup();
+  const o = book.create(500_000n, 60_000_000n, 600);
+  book.onNote(note(`rv1|${o.order_id}|${burner}`, 500_000, 20));
+  book.reprice(o.order_id, 57_000_000n);
+  assert.equal(book.due()[0]!.lamports, 57_000_000n);
+  book.markPaying(o.order_id, "sig", 1);
+  book.reprice(o.order_id, 1n);
+  assert.equal(book.inFlight().length, 1);
+  assert.equal(book.committedLamports(), 57_000_000n, "in flight at the re-priced amount");
 });

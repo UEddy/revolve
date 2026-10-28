@@ -6,6 +6,7 @@ import { base } from "viem/chains";
 import type { Chain } from "./chains.ts";
 import { secretPathProblem } from "./keypath.ts";
 import type { OrderBook } from "./orders.ts";
+import { repriced } from "./pricing.ts";
 
 // EVM payouts (API_CONTRACT.md v1.4, Base). One payout in flight per chain:
 // the signed transaction, its hash and nonce are stored before broadcast, and
@@ -109,7 +110,7 @@ export class BasePayer implements EvmChain {
         if (t.input.toLowerCase() !== toHex(fundId)) return "bad";
         const block = await this.client.getBlock({ blockNumber: t.blockNumber });
         const at = Number(block.timestamp);
-        return at >= notBefore && at <= notAfter ? "ok" : "bad";
+        return at >= notBefore && at <= notAfter ? { ok: true, at } : "bad";
       },
     };
   }
@@ -124,12 +125,18 @@ export class BasePayer implements EvmChain {
   }
 }
 
-export type EvmLimits = { reserve: bigint; dailyCap: bigint; receiptWaitMs?: number };
+/**
+ * `quote` prices an order's ZEC amount now (see guardPayout); without it (the
+ * operator's own payouts) a quote is paid as it stands.
+ */
+export type EvmLimits = { reserve: bigint; dailyCap: bigint; receiptWaitMs?: number; quote?: (amountZat: bigint) => bigint | null; maxMoveBps?: number };
 
 /** Pays one chain's due orders, one at a time, never more than one in flight. */
 export async function runEvmPayouts(book: OrderBook, chain: Chain, payer: EvmChain, limits: EvmLimits): Promise<void> {
   if (!(await reconcileEvm(book, chain, payer))) return;
-  for (const due of book.due(chain)) {
+  for (const quoted of book.due(chain)) {
+    const due = repriced(book, chain, quoted, limits);
+    if (due === null) return;
     if (book.paidOrPayingToday(chain) + due.lamports > limits.dailyCap) {
       console.error(`${chain} payout waiting: daily payout cap reached`);
       return;
