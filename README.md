@@ -170,8 +170,6 @@ The withdrawal spends only Orchard notes and pays only an Orchard receiver, so n
 
 ## FAQ
 
-Short answers to the questions we expect; each links to the full story.
-
 **Why not just use Zodl's built-in Swap or NEAR Intents?**
 They deshield: the ZEC leaves through a public transparent output whose amount and time can be matched to the swap on the other chain ([proven above](#the-problem-proven-on-mainnet)), and the swap provider sees both ends. Revolve pays and withdraws fully shielded, and no third party learns both ends.
 
