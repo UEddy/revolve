@@ -6,7 +6,7 @@ import { useCredits, KeyChanged } from "../state/credits.tsx";
 import { useEngine } from "../state/engine.tsx";
 import { AmountEntry, useAmount, useLimits, zecLabel } from "../components/AmountEntry.tsx";
 import { PayCard } from "../components/PayCard.tsx";
-import { Sheet, Spinner, TopBar, errorText } from "../components/bits.tsx";
+import { CANCELLED_TEXT, CancelPayment, Sheet, Spinner, TopBar, errorText } from "../components/bits.tsx";
 import { Check } from "../components/icons.tsx";
 import { formatZec } from "../lib/amount.ts";
 import { buildFundMemo, creditsToZats, FUND_MAX_ZATS, FUND_MIN_ZATS } from "../lib/credits.ts";
@@ -115,8 +115,21 @@ function fundingStep(f: Funding): number {
 }
 
 export function FundingScreen({ id }: { id: string }) {
-  const { credits, balance } = useCredits();
+  const { credits, balance, cancelFunding } = useCredits();
+  const [cancelled, setCancelled] = useState(false);
   const f = credits?.fundings.find((x) => x.fundId === id);
+  if (!f && cancelled) {
+    return (
+      <div className="screen">
+        <TopBar title="Add funds" />
+        <div className="card flat">
+          <h3>Payment cancelled</h3>
+          <p className="muted">{CANCELLED_TEXT}</p>
+          <a className="btn ghost" href={href.fund}>Start again</a>
+        </div>
+      </div>
+    );
+  }
   if (!f) return <div className="screen"><TopBar title="Add funds" /><p className="empty">This funding is not in your vault.</p></div>;
   const steps = ["Pay from your Zcash wallet", "Payment seen", "Confirming (3 blocks)", "Issuing credits"];
   const at = fundingStep(f);
@@ -131,6 +144,12 @@ export function FundingScreen({ id }: { id: string }) {
           expiresAt={f.expiresAt}
           memoNote="The message only names this funding; it carries nothing about you and is encrypted on chain."
         />
+      )}
+      {f.status === "awaiting_payment" && (
+        <>
+          <div className="spacer" />
+          <CancelPayment what="funding" run={() => cancelFunding(f.fundId).then(() => setCancelled(true))} />
+        </>
       )}
       {f.status === "minted" && (
         <div className="card">

@@ -7,7 +7,7 @@ import { useVault } from "./vault.tsx";
 import { newBurner } from "../lib/burner.ts";
 import { MOCK, SOL_MINT, SWAP_RESERVE_LAMPORTS } from "../lib/config.ts";
 import { buildMemo, zip321 } from "../lib/memo.ts";
-import { createOrder, getOrder, type OrderState } from "../lib/orders.ts";
+import { cancelOrder, createOrder, getOrder, OrderApiError, type OrderState } from "../lib/orders.ts";
 import { ultraOrder, usdPrice } from "../lib/jupiter.ts";
 import { lamports, tokenRaw } from "../lib/solana.ts";
 import { buyWithPayout, fundedEnough, NotFunded, sellAll } from "../lib/swap.ts";
@@ -27,6 +27,12 @@ type Engine = {
   /** User-started signing (a retried buy, a sale) asks for a fresh passkey check first; the automatic buy after a payout does not. */
   retrySwap(id: string): Promise<void>;
   sell(id: string): Promise<void>;
+  /**
+   * Cancels an unpaid order. On success the position and its unused fresh
+   * wallet leave the vault. Throws (and keeps it) when a payment was already
+   * seen or the server has no open record of it.
+   */
+  cancel(id: string): Promise<void>;
   refresh(id: string): void;
   /** Fetches one asset's price now (no wallet involved, so no stagger needed). */
   priceOf(mint: string): void;
@@ -282,6 +288,22 @@ export function EngineProvider({ children }: { children: ReactNode }) {
     [updatePosition, vault],
   );
 
+  const cancel = useCallback(
+    async (id: string) => {
+      const p = latest.current.find((x) => x.id === id);
+      if (!p || p.stage !== "awaiting_payment" || p.paidWith === "credits") throw new Error("Only an unpaid order can be cancelled.");
+      const r = await cancelOrder(p.order.id);
+      if (r === "processing") {
+        await updatePosition(id, (x) => void (x.stage = "settling"));
+        throw new OrderApiError("A payment for this order has already been seen, so it can't be cancelled. It's already being processed.", 409, "payment_seen");
+      }
+      if (r === "unknown") throw new OrderApiError("Revolve has no open record of this order, so nothing was cancelled. It may already have been paid out.", 404, "not_found");
+      // The wallet was made for this order alone and never received anything.
+      await update((d) => void (d.positions = d.positions.filter((x) => x.id !== id)));
+    },
+    [update, updatePosition],
+  );
+
   // ---- staggered balance checks, one burner at a time ----
   useEffect(() => {
     if (!data) return;
@@ -319,8 +341,8 @@ export function EngineProvider({ children }: { children: ReactNode }) {
   const priceOf = useCallback((mint: string) => void price(mint), [price]);
 
   const api = useMemo<Engine>(
-    () => ({ prices, busy, startOrder, retrySwap, sell, refresh, priceOf }),
-    [prices, busy, startOrder, retrySwap, sell, refresh, priceOf],
+    () => ({ prices, busy, startOrder, retrySwap, sell, cancel, refresh, priceOf }),
+    [prices, busy, startOrder, retrySwap, sell, cancel, refresh, priceOf],
   );
   return <Ctx.Provider value={api}>{children}</Ctx.Provider>;
 }

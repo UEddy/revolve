@@ -77,6 +77,16 @@ Statuses, in order:
 
 After `paid_out`, the server deletes the order to burner mapping and keeps only aggregate counts. GET returns the paid status from a short-lived cache for 15 minutes, then 404.
 
+## DELETE /orders/:order_id
+
+Cancels an order nobody has paid yet. Allowed only while no payment note has been seen for it: status `awaiting_payment` (or `expired` without a payment).
+
+- 204, no body: cancelled. The record is deleted and the inventory it reserved is released; `GET` then answers 404. Only a hash of the order id is kept.
+- 409 `{"error":"payment_seen"}`: a payment has already been seen (`seen`, `confirmed`, `needs_review`, `paid_out`, or a credit-token order). The order is kept and processed as usual.
+- 404 `{"error":"not_found"}`: unknown, already cancelled, or paid out more than 15 minutes ago.
+
+A payment that still arrives for a cancelled order is held for manual review (`paid_after_cancel`, like `paid_after_expiry`) and refunded by hand; it is never paid out automatically.
+
 ## Rules for the worker
 
 - Match on memo `order_id` AND the order's exact `amount_zec`. Anything else goes to `needs_review`.

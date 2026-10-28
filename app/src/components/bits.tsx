@@ -67,6 +67,47 @@ export function Sheet({ open, onClose, children }: { open: boolean; onClose: () 
   );
 }
 
+/** After a cancel: the record and its wallet are gone, but a payment could still be on its way. */
+export const CANCELLED_TEXT = "Cancelled. Don't send this payment; if you already did, it goes to review and can be refunded.";
+
+/** "Cancel payment" with its confirm sheet. `run` rejects with the reason to show when nothing was cancelled. */
+export function CancelPayment({ what, run }: { what: string; run: () => Promise<void> }) {
+  const [asking, setAsking] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  return (
+    <>
+      {error && <p className="err">{error}</p>}
+      <button className="btn ghost" disabled={busy} onClick={() => setAsking(true)}>
+        {busy ? <Spinner /> : null} Cancel payment
+      </button>
+      <Sheet open={asking} onClose={() => setAsking(false)}>
+        <h3 className="display" style={{ fontSize: 20 }}>Cancel this payment?</h3>
+        <p className="muted">
+          Revolve forgets this {what}. Only cancel if you haven't sent the ZEC: a payment that still arrives goes to manual review and is
+          refunded by hand.
+        </p>
+        <div className="stack">
+          <button className="btn ghost" onClick={() => setAsking(false)}>Keep it</button>
+          <button
+            className="btn danger"
+            onClick={() => {
+              setAsking(false);
+              setBusy(true);
+              setError(null);
+              run()
+                .catch((e: unknown) => setError(errorText(e)))
+                .finally(() => setBusy(false));
+            }}
+          >
+            Yes, cancel payment
+          </button>
+        </div>
+      </Sheet>
+    </>
+  );
+}
+
 export function TopBar({ title, right, noBack }: { title?: ReactNode; right?: ReactNode; noBack?: boolean }) {
   return (
     <div className="top">
