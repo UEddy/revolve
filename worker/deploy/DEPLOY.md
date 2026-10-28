@@ -131,6 +131,34 @@ min(balance, `BASE_HOT_WALLET_CAP_WEI`) less `BASE_RESERVE_WEI` (0.0002 ETH by
 default, for payout gas). Each payout adds `BASE_GAS_ALLOWANCE_WEI` (0.00003 ETH)
 for the fresh wallet's own swap gas.
 
+## D5d [droplet] Withdrawal hot wallet (optional)
+
+Withdrawals of credits to shielded ZEC (CREDITS_CONTRACT.md v1.5) are paid from a
+separate ZEC wallet with its own seed, never from the deposit address. Without it
+the worker logs `!!! WITHDRAWALS UNAVAILABLE` and `/withdrawals` answers 503;
+cash-ins to credits still work.
+
+```bash
+mkdir -p /opt/revolve/solver/data/payer && chown revolve:revolve /opt/revolve/solver/data/payer
+sudo -u revolve /opt/revolve/solver/revolve-watcher payer-keygen /opt/revolve/secrets/zec-payer.seed
+cat > /opt/revolve/solver/payer.env <<'EOF'
+REVOLVE_PAYER_SEED_PATH=/opt/revolve/secrets/zec-payer.seed
+REVOLVE_PAYER_BIRTHDAY=<current block height, from a block explorer>
+REVOLVE_PAYER_DATA_DIR=/opt/revolve/solver/data/payer
+REVOLVE_NETWORK=main
+REVOLVE_LIGHTWALLETD=https://eu.zec.rocks:443
+REVOLVE_TOR=1
+EOF
+chown revolve:revolve /opt/revolve/solver/payer.env && chmod 600 /opt/revolve/solver/payer.env
+sudo -u revolve REVOLVE_ENV_FILE=/opt/revolve/solver/payer.env /opt/revolve/solver/revolve-watcher payer-address   # fund this u1… address
+printf 'ZEC_PAYER_ENV_FILE=/opt/revolve/solver/payer.env\nWITHDRAW_DAILY_CAP_ZAT=50000000\n' >> /opt/revolve/worker/.env
+```
+
+Send ZEC to the printed address from the deposit wallet (Zodl), only as much as
+withdrawals need for a while: it is a hot wallet. `payer-balance` (same env) syncs
+and prints what is spendable; the worker checks it every 5 minutes and refuses
+withdrawals it couldn't pay (the credits stay unspent).
+
 ## D6 [droplet] Start the services
 
 ```bash
@@ -179,5 +207,10 @@ journalctl -u caddy -u revolve-worker -u revolve-relay --since today | grep -v '
 - Review items: `cd /opt/revolve/worker && sudo -u revolve node src/admin.ts list`
   (and `pay-out ...`, see `src/admin.ts`). Run from an SSH shell only.
 - Update code: rerun D4's `git archive` line, run D5's two `npm ci` lines if a `package-lock.json` changed, then `systemctl restart revolve-worker revolve-relay`.
-- Update the watcher: rebuild locally, `scp` the binary (D4), `systemctl restart revolve-worker`.
+- Update the watcher (and the payer, same binary): CI builds it on every change to `solver/` and publishes it on the `watcher-latest` release (`.github/workflows/watcher.yml`). On the droplet:
+  ```bash
+  cd /tmp && R=https://github.com/UEddy/revolve/releases/download/watcher-latest
+  curl -fsSLO $R/revolve-watcher && curl -fsSLO $R/revolve-watcher.sha256 && sha256sum -c revolve-watcher.sha256
+  install -o revolve -g revolve -m 755 revolve-watcher /opt/revolve/solver/revolve-watcher && systemctl restart revolve-worker
+  ```
 - Roll back Caddy: `cp /etc/caddy/Caddyfile.floorfight.bak /etc/caddy/Caddyfile && systemctl reload caddy`.

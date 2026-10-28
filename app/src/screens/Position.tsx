@@ -108,8 +108,11 @@ export function PositionScreen({ id }: { id: string }) {
   const value = prices[p.token.mint] !== undefined ? held * prices[p.token.mint]! : null;
   const c = cashOf(p);
   const cash = units(p.balance?.lamports, c.decimals) * (prices[c.mint] ?? 0);
-  // Zodl's Swap takes SOL; Base positions sell to ETH and can be sent out, but not cashed out to Zcash yet.
-  const canCashOut = !p.chain;
+  // Both chains cash out privately to credits; Zodl's Swap (SOL only) is the second route on Solana.
+  const plan = p.cashoutPlan;
+  const planLeft = plan?.parts.filter((x) => !x.fundId && !x.skipped) ?? [];
+  const canCashOut = planLeft.length === 0;
+  const planDone = plan ? plan.parts.filter((x) => x.fundId).reduce((n, x) => n + x.credits, 0) : 0;
   const tokenHref = p.chain === "base" ? href.baseToken(p.token.mint) : href.token(p.token.mint);
   const risk = positionRisk(p, all);
   const live = p.stage === "held" || p.stage === "closed";
@@ -145,18 +148,28 @@ export function PositionScreen({ id }: { id: string }) {
           </div>
           <div className="spacer" />
           {error && <p className="err">{error}</p>}
+          {plan && (
+            <div className="card flat small" style={{ marginBottom: 12 }}>
+              <b>Cashing out to credits{plan.mode === "gradual" ? ", gradually" : ""}</b>
+              <p className="muted" style={{ margin: "6px 0 0" }}>
+                {planLeft.length === 0
+                  ? `Done: ${planDone} credits sent to your balance.`
+                  : `${plan.parts.length - planLeft.length} of ${plan.parts.length} parts sent. Next at ${new Date(Math.min(...planLeft.map((x) => x.at))).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}; keep Revolve open around then, or it goes out next time you open it.`}
+              </p>
+            </div>
+          )}
           {p.stage === "held" && (
             <div className="stack">
               <button className="btn" disabled={!!doing} onClick={() => setSelling(true)}>{doing === "Selling" ? <Spinner /> : null} Sell to cash</button>
-              {canCashOut && <button className="btn ghost" disabled={!!doing} onClick={() => setCashingOut(true)}>Cash out to Zcash</button>}
+              {canCashOut && <button className="btn ghost" disabled={!!doing} onClick={() => setCashingOut(true)}>Cash out</button>}
               <button className="btn ghost" onClick={() => setSending(true)}>Send out</button>
             </div>
           )}
           {p.stage === "closed" && (
             <div className="stack">
-              <p className="muted center">Sold. The {c.symbol} stays in this wallet{canCashOut ? "" : "; send it out when you're ready"}.</p>
+              <p className="muted center">Sold. The {c.symbol} stays in this wallet{canCashOut ? "" : " until the cash-out below takes it"}.</p>
               {canCashOut && BigInt(p.balance?.lamports ?? "0") > 0n && (
-                <button className="btn" onClick={() => setCashingOut(true)}>Cash out to Zcash</button>
+                <button className="btn" onClick={() => setCashingOut(true)}>Cash out</button>
               )}
             </div>
           )}

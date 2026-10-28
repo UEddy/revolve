@@ -5,12 +5,13 @@ import { useVault } from "../state/vault.tsx";
 import { useEngine } from "../state/engine.tsx";
 import { positionRisk } from "../lib/coach.ts";
 import { ZEC_MINT } from "../lib/config.ts";
+import { WithdrawSheet } from "./Withdraw.tsx";
 import { cashOf } from "../lib/chain.ts";
 import { amount, usd, units, ago } from "../lib/format.ts";
 import type { Funding, Position } from "../lib/model.ts";
 import { useCredits } from "../state/credits.tsx";
 import { BalanceText } from "./Fund.tsx";
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
 import { href } from "../router.ts";
 import { Meter, Spinner, TokenIcon, Wordmark } from "../components/bits.tsx";
 import { Lock, Mark } from "../components/icons.tsx";
@@ -39,9 +40,21 @@ const FUNDING_TEXT: Partial<Record<Funding["status"], string>> = {
   needs_review: "Needs review",
 };
 
+/** A cash-in (v1.5) is a funding paid from a position; it reads as such. */
+const CASHIN_TEXT: Partial<Record<Funding["status"], string>> = {
+  awaiting_payment: "Sending from your position",
+  funded: "Issuing your credits",
+  needs_review: "Needs review",
+};
+
+const WITHDRAW_TEXT = { sending: "Sending your request", queued: "Paying within about 2 hours", sent: "Sent, shielded", failed: "Needs a look" } as const;
+
 function CreditsCard() {
   const { balance, credits } = useCredits();
-  const open = (credits?.fundings ?? []).filter((f) => FUNDING_TEXT[f.status]);
+  const [withdrawing, setWithdrawing] = useState(false);
+  const open = (credits?.fundings ?? []).filter((f) => (f.cashin ? CASHIN_TEXT : FUNDING_TEXT)[f.status]);
+  const day = Date.now() - 24 * 3600_000;
+  const outs = (credits?.withdrawals ?? []).filter((w) => w.status !== "sent" || w.createdAt > day);
   return (
     <>
       <div className="card flat row" style={{ marginTop: 18 }}>
@@ -49,7 +62,10 @@ function CreditsCard() {
           <div className="eyebrow">Credits</div>
           <div style={{ marginTop: 6, fontWeight: 600 }}><BalanceText credits={balance} /></div>
         </div>
-        <a className="btn small" href={href.fund}>Add funds</a>
+        <div className="row" style={{ gap: 8 }}>
+          {balance > 0 && <button className="btn small ghost" onClick={() => setWithdrawing(true)}>Withdraw</button>}
+          <a className="btn small" href={href.fund}>Add funds</a>
+        </div>
       </div>
       {open.length > 0 && (
         <div className="list" style={{ marginTop: 10 }}>
@@ -57,14 +73,29 @@ function CreditsCard() {
             <a key={f.fundId} className="trow" href={href.funding(f.fundId)}>
               <span className="ticon"><Mark style={{ width: 26, height: 26 }} /></span>
               <div className="grow">
-                <div className="name">Adding {f.amountZec} ZEC</div>
-                <div className="sub">{FUNDING_TEXT[f.status]}</div>
+                <div className="name">{f.cashin ? `Cashing out ${f.amountZec} ZEC to credits` : `Adding ${f.amountZec} ZEC`}</div>
+                <div className="sub">{(f.cashin ? CASHIN_TEXT : FUNDING_TEXT)[f.status]}</div>
               </div>
               <div className="right">{f.status === "funded" || f.status === "seen" ? <Spinner /> : null}</div>
             </a>
           ))}
         </div>
       )}
+      {outs.length > 0 && (
+        <div className="list" style={{ marginTop: 10 }}>
+          {outs.map((w) => (
+            <div key={w.key} className="trow">
+              <span className="ticon"><Mark style={{ width: 26, height: 26 }} /></span>
+              <div className="grow">
+                <div className="name">Withdrawing {w.amountZec} ZEC</div>
+                <div className="sub">{w.error ?? WITHDRAW_TEXT[w.status]}</div>
+              </div>
+              <div className="right">{w.status === "sending" || w.status === "queued" ? <Spinner /> : null}</div>
+            </div>
+          ))}
+        </div>
+      )}
+      <WithdrawSheet open={withdrawing} onClose={() => setWithdrawing(false)} />
     </>
   );
 }

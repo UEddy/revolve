@@ -188,7 +188,8 @@ export const dayKey = (ms: number, chain: Chain = "solana") =>
 
 export class OrderBook {
   readonly funds: FundBook;
-  private readonly db: DatabaseSync;
+  /** Shared with the withdrawal book: one database, one writer process. */
+  readonly db: DatabaseSync;
   private readonly now: () => number;
   /** order_id -> payout signature (or EVM transaction hash), memory only, for a short while after payout. */
   private readonly paid = new Map<string, { signature: string; chain: Chain; until: number }>();

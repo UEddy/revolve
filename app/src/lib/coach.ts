@@ -26,7 +26,8 @@ function launchAge(token: TokenRef, at: number): number | null {
 /** Addresses that more than one of the user's positions has sent to. */
 function sharedDestinations(all: Position[]): Set<string> {
   const seen = new Map<string, Set<string>>();
-  for (const p of all) for (const s of p.sends) seen.set(s.to, (seen.get(s.to) ?? new Set()).add(p.id));
+  // Cash-ins go to Revolve's hot wallet, which every user pays into: a shared destination that links no one.
+  for (const p of all) for (const s of p.sends) if (!s.cashin) seen.set(s.to, (seen.get(s.to) ?? new Set()).add(p.id));
   return new Set([...seen].filter(([, ids]) => ids.size > 1).map(([to]) => to));
 }
 
@@ -44,7 +45,8 @@ export function positionRisk(p: Position, all: Position[]): Risk {
   if (twin) reasons.push({ points: 15, text: "Another of your wallets bought the same asset within the hour." });
   const shared = sharedDestinations(all);
   for (const s of p.sends) {
-    if (s.cashout && !shared.has(s.to)) reasons.push({ points: 10, text: "Cashed out to Zcash through Zodl's swap: the deposit, its amount and time are public on the swap's chain; the ZEC itself lands shielded." });
+    if (s.cashin) reasons.push({ points: 5, text: "Cashed out to Revolve credits: the transfer to the shared hot wallet is public, but credits are blind-signed, so nothing links it to what you withdraw." });
+    else if (s.cashout && !shared.has(s.to)) reasons.push({ points: 10, text: "Cashed out to Zcash through Zodl's swap: the deposit, its amount and time are public on the swap's chain; the ZEC itself lands shielded." });
     else if (shared.has(s.to)) reasons.push({ points: 40, text: `Sent to ${short(s.to)}, which another of your wallets also sent to. Anyone can join them.` });
     else reasons.push({ points: 15, text: `Sent to ${short(s.to)}: that address is now tied to this purchase.` });
   }
@@ -122,6 +124,38 @@ export function creditWarnings(spendCredits: number, credits: Credits | undefine
         ? "It's also exactly the amount you added, so the funding and this buy can be matched by amount. Spending part of it, or buying in a few smaller steps, blends in better."
         : "Emptying the balance in one buy makes the amount easier to match to your funding. Spending part of it blends in better.",
     });
+  }
+  return w;
+}
+
+const WITHDRAW_SOON_MS = 2 * 60 * MIN;
+
+/**
+ * Before withdrawing credits to shielded ZEC (v1.5). Blind signing hides which
+ * credits came from where, but a withdrawal of exactly what just came in, or
+ * right after it came in, can still be paired by amount and timing.
+ */
+export function withdrawWarnings(withdrawCredits: number, credits: Credits | undefined, now: number): Warning[] {
+  const w: Warning[] = [];
+  const balance = credits?.tokens.length ?? 0;
+  const recent = (credits?.fundings ?? []).filter((f) => f.mintedAt && now - f.mintedAt < 24 * 60 * MIN);
+  const newest = recent.sort((a, b) => b.mintedAt! - a.mintedAt!)[0];
+  if (newest?.mintedAt && now - newest.mintedAt < WITHDRAW_SOON_MS) {
+    const m = Math.max(1, Math.round((now - newest.mintedAt) / MIN));
+    w.push({
+      level: "high",
+      title: `Credits came in ${m} minute${m === 1 ? "" : "s"} ago`,
+      body: `A withdrawal right after a ${newest.cashin ? "cash-out" : "funding"} can be paired with it by timing. Waiting a few hours, or a day, breaks that link.`,
+    });
+  }
+  if (withdrawCredits > 0 && recent.some((f) => f.credits === withdrawCredits)) {
+    w.push({
+      level: "high",
+      title: "Same amount as a recent cash-in",
+      body: "Withdrawing exactly what came in lets the two be matched by amount. Withdraw a different amount, or in a few parts.",
+    });
+  } else if (withdrawCredits > 0 && withdrawCredits === balance) {
+    w.push({ level: "medium", title: "This withdraws your whole balance", body: "Leaving some credits, or withdrawing in parts, makes the amount harder to match." });
   }
   return w;
 }

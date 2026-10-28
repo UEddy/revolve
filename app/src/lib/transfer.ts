@@ -79,6 +79,13 @@ export function ata(owner: string, mint: string, tokenProgram: string): Promise<
   return findPda([pubkeyBytes(owner), pubkeyBytes(tokenProgram), pubkeyBytes(mint)], ATA_PROGRAM);
 }
 
+/** The SPL Memo program (v2): it checks only the signers it lists, here none. */
+export const MEMO_PROGRAM = "MemoSq4gqABAXKb96qnH8TysNcWxMyWCqXgDLGmfcHr";
+
+export function memoIx(text: string): Ix {
+  return { program: MEMO_PROGRAM, accounts: [], data: new TextEncoder().encode(text) };
+}
+
 export function cashIx(from: string, to: string, lamports: bigint): Ix {
   return {
     program: SYSTEM_PROGRAM,
@@ -153,10 +160,13 @@ export async function sendAllToken(key: BurnerKey, mint: string, to: string): Pr
   return submit(key, await tokenIxs(key.pub, to, mint, acct.account.owner, acct.pubkey, BigInt(info.amount), info.decimals));
 }
 
-/** Sends exactly `amount` lamports (the fee comes on top). */
-export function sendCash(key: BurnerKey, to: string, amount: bigint): Promise<string> {
+/**
+ * Sends exactly `amount` lamports (the fee comes on top). A `memo` rides in the
+ * same transaction: a cash-in names its fund id there, so no one else can claim it.
+ */
+export function sendCash(key: BurnerKey, to: string, amount: bigint, memo?: string): Promise<string> {
   if (amount <= 0n) throw new Error("Nothing to send");
-  return submit(key, [cashIx(key.pub, to, amount)]);
+  return submit(key, memo ? [cashIx(key.pub, to, amount), memoIx(memo)] : [cashIx(key.pub, to, amount)]);
 }
 
 /** Sends all cash except the network fee. */

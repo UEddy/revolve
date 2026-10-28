@@ -21,7 +21,16 @@ interface FundRow {
   confirmations: number;
   review_reason: string | null;
   blinded_hash: string | null;
+  /** v1.5 cash-ins: the chain paid on; NULL for a ZEC funding. */
+  source: string | null;
+  pay_amount: string | null;
 }
+
+/** A cash-in's quote, as POST /cashins/:id/sent checks a transaction against it. */
+export type CashinQuote = { status: FundStatus; source: string; payAmount: bigint; expiresAt: number };
+
+/** How long after its quote expires a cash-in transfer is still accepted (its transaction may land late). */
+export const CASHIN_GRACE_SECS = 600;
 
 // Same alphabet as order ids: lowercase Crockford base32.
 const ALPHABET = "0123456789abcdefghjkmnpqrstvwxyz";
@@ -97,15 +106,56 @@ export class FundBook {
     return Number(r.changes) === 1;
   }
 
+  /** A cash-in (v1.5): a funding paid by a transfer of `payAmount` on `chain` instead of a ZEC note. */
+  createCashin(chain: string, credits: number, payAmount: bigint, ttlSecs: number) {
+    const fundId = newFundId();
+    const expiresAt = Math.floor(this.now() / 1000) + ttlSecs;
+    this.db
+      .prepare("INSERT INTO fund_orders (fund_id, amount_zat, expires_at, status, source, pay_amount) VALUES (?, ?, ?, 'awaiting_payment', ?, ?)")
+      .run(fundId, Number(BigInt(credits) * CREDIT_ZAT), expiresAt, chain, payAmount.toString());
+    return { fund_id: fundId, expires_at: new Date(expiresAt * 1000).toISOString().replace(/\.\d{3}Z$/, "Z") };
+  }
+
+  cashinQuote(fundId: string): CashinQuote | null {
+    const r = this.row(fundId);
+    return r?.source ? { status: r.status, source: r.source, payAmount: BigInt(r.pay_amount!), expiresAt: r.expires_at } : null;
+  }
+
+  /**
+   * Funds a cash-in with a verified transaction, once: false when that
+   * transaction was already used, or the cash-in is no longer awaiting payment.
+   */
+  fundCashin(fundId: string, txHash: string): "funded" | "tx_used" | "not_awaiting" {
+    this.db.exec("BEGIN IMMEDIATE");
+    try {
+      if (this.db.prepare("SELECT 1 FROM used_cashin_txs WHERE tx_hash = ?").get(txHash)) {
+        this.db.exec("ROLLBACK");
+        return "tx_used";
+      }
+      const r = this.db.prepare("UPDATE fund_orders SET status = 'funded', confirmations = ? WHERE fund_id = ? AND source IS NOT NULL AND status = 'awaiting_payment'").run(REQUIRED_CONFS, fundId);
+      if (Number(r.changes) !== 1) {
+        this.db.exec("ROLLBACK");
+        return "not_awaiting";
+      }
+      this.db.prepare("INSERT INTO used_cashin_txs VALUES (?)").run(txHash);
+      this.db.exec("COMMIT");
+      return "funded";
+    } catch (e) {
+      if (this.db.isTransaction) this.db.exec("ROLLBACK");
+      throw e;
+    }
+  }
+
   /** Cancels an unpaid funding, as OrderBook.cancel does for orders. */
   cancel(fundId: string): CancelResult {
     return cancelRow(this.db, "fund_orders", "fund_id", fundId);
   }
 
   expire(): void {
+    // A cash-in keeps the grace window open for a transfer that landed just in time.
     this.db
-      .prepare("UPDATE fund_orders SET status = 'expired' WHERE status = 'awaiting_payment' AND expires_at <= ?")
-      .run(Math.floor(this.now() / 1000));
+      .prepare("UPDATE fund_orders SET status = 'expired' WHERE status = 'awaiting_payment' AND expires_at + (CASE WHEN source IS NULL THEN 0 ELSE ? END) <= ?")
+      .run(CASHIN_GRACE_SECS, Math.floor(this.now() / 1000));
   }
 
   /** True if this note already belongs to a funding (its confirmations were updated). */
@@ -124,6 +174,8 @@ export class FundBook {
     if (fundId === null) return "malformed_memo";
     const fund = this.row(fundId);
     if (!fund) return wasCancelled(this.db, fundId) ? "paid_after_cancel" : "unknown_fund";
+    // A cash-in is paid on its own chain, never with ZEC.
+    if (fund.source) return "wrong_rail";
     if (fund.status !== "awaiting_payment" && fund.status !== "expired") return "duplicate_payment";
 
     let reason: string | null = null;

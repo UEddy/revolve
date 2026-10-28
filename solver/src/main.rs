@@ -7,10 +7,12 @@
 //!   revolve-watcher --once    one sync round, then exit
 //!   revolve-watcher address   print the Orchard-only deposit UA
 //!   revolve-watcher ufvk      print the Orchard-only UFVK, for the server's env file
+//!   revolve-watcher payer-…   the withdrawal hot wallet (see payer.rs)
 
 mod cache;
 mod config;
 mod notes;
+mod payer;
 
 use std::time::Duration;
 
@@ -51,6 +53,11 @@ async fn main() -> anyhow::Result<()> {
             tracing_subscriber::EnvFilter::try_from_default_env().unwrap_or_else(|_| "info".into()),
         )
         .init();
+
+    let args: Vec<String> = std::env::args().skip(1).collect();
+    if let Some(cmd) = args.first().filter(|c| c.starts_with("payer-")) {
+        return payer::run(cmd, &args[1..]).await;
+    }
 
     let cfg = Config::load()?;
     let arg = std::env::args().nth(1);
@@ -149,7 +156,11 @@ fn orchard_only_ufvk(cfg: &Config) -> anyhow::Result<UnifiedFullViewingKey> {
 }
 
 async fn connect(cfg: &Config, tor: Option<&tor::Client>) -> anyhow::Result<Lwd> {
-    let uri = cfg.lightwalletd.parse()?;
+    connect_lwd(&cfg.lightwalletd, tor).await
+}
+
+async fn connect_lwd(lightwalletd: &str, tor: Option<&tor::Client>) -> anyhow::Result<Lwd> {
+    let uri = lightwalletd.parse()?;
     Ok(match tor {
         Some(tor) => tor.connect_to_lightwalletd(uri, false).await?,
         None => {
