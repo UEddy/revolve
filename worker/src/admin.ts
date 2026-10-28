@@ -31,7 +31,7 @@ function list() {
   const orders = book.reviewOrders();
   console.log(`orders in needs_review (${orders.length}):`);
   for (const o of orders) {
-    console.log(`  ${o.order_id}  ${zatToZec(BigInt(o.bucket_zat))} ZEC  ${o.review_reason}  note=${o.note_key}  burner=${o.burner}`);
+    console.log(`  ${o.order_id}  ${zatToZec(BigInt(o.bucket_zat))} ZEC  ${o.chain}  ${o.review_reason}  note=${o.note_key}  burner=${o.burner}`);
   }
   // Fundings carry no burner: they are refunded offline, never minted from here.
   const funds = book.funds.reviewFunds();
@@ -59,6 +59,8 @@ async function payOut(args: string[]) {
     if (q.noteKey !== null || (q.status !== "awaiting_payment" && q.status !== "expired")) {
       fail(`order ${value} is ${q.status}${q.noteKey ? " with a note" : ""}; it must be unpaid`);
     }
+    // Pay-out here goes through the Solana hot wallet only; Base review items are refunded by hand.
+    if (q.chain !== "solana") fail(`order ${value} pays out on ${q.chain}; pay-out handles Solana orders only`);
     if (q.bucketZat !== BigInt(note.value_zat)) {
       fail(`note is ${zatToZec(BigInt(note.value_zat))} ZEC but order ${value} quoted ${zatToZec(q.bucketZat)} ZEC`);
     }

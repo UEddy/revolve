@@ -94,6 +94,7 @@ test("GET /limits: grid, max rounded down to the step after the fee allowance", 
         max_zec: "0.005",
         step_zec: "0.001",
         indicative_usd_per_zec: "1224.50",
+        chains: { solana: { min_zec: "0.002", max_zec: "0.005", step_zec: "0.001" } },
       });
     },
     { quote: (zat) => zat * 100n + 5_000_000n },
@@ -106,6 +107,7 @@ test("GET /limits: max below min when inventory is short, large max when plentif
       max_zec: "0.001",
       step_zec: "0.001",
       indicative_usd_per_zec: "1224.50",
+      chains: { solana: { min_zec: "0.002", max_zec: "0.001", step_zec: "0.001" } },
     });
   });
   await withApi(5_000_000n, async (base) => {

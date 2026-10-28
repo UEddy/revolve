@@ -1,5 +1,6 @@
 import { createHash } from "node:crypto";
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
+import { isChain, isValidRecipient, payoutField, type Chain } from "./chains.ts";
 import { FUND_MAX_ZAT, isFundId } from "./funds.ts";
 import { CREDIT_ZAT, TOKEN_MSG_BYTES, b64, type Mint } from "./mint.ts";
 import {
@@ -7,7 +8,6 @@ import {
   MIN_ZAT,
   STEP_ZAT,
   isOrderId,
-  isValidBurner,
   onGrid,
   zatToZec,
   zecToZat,
@@ -21,12 +21,14 @@ export interface ServerDeps {
   depositUa: string;
   quoteTtlSecs: number;
   maxOpenOrders: number;
-  /** Payout for an order amount, or null when no price is available. */
-  quote: (amountZat: bigint) => bigint | null;
+  /** Payout for an order amount on a chain (lamports or wei), or null when no price is available. */
+  quote: (amountZat: bigint, chain: Chain) => bigint | null;
   /** Indicative USD per ZEC for display, or null when no price is available. */
   usdPerZec: () => string | null;
-  /** Lamports free to promise to new orders, or null if unknown. */
-  freeInventory: () => bigint | null;
+  /** Payout units free to promise to new orders on a chain, or null if unknown. */
+  freeInventory: (chain: Chain) => bigint | null;
+  /** Chains with a configured hot wallet (default: Solana only). Others answer chain_unavailable. */
+  chains?: Chain[];
   /** The credits mint, or null when no mint key is configured (the /mint routes then answer 503). */
   mint: Mint | null;
   /** Global request budgets (tests pass their own). */
@@ -129,10 +131,21 @@ function sendCancel(res: ServerResponse, r: CancelResult) {
   send(res, r === "payment_seen" ? 409 : 404, { error: r });
 }
 
+/** A chain is offered when it has a hot wallet, a price and a known balance. */
+function chainReady(deps: ServerDeps, chain: Chain): boolean {
+  return (deps.chains ?? ["solana"]).includes(chain) && deps.freeInventory(chain) !== null && deps.quote(1n, chain) !== null;
+}
+
+/** The request's chain: absent means Solana; anything unknown is null. */
+function chainOf(body: Record<string, unknown>): Chain | null {
+  if (body.chain === undefined) return "solana";
+  return isChain(body.chain) ? body.chain : null;
+}
+
 /** An amount is available when there is a price and the hot wallet can cover its payout. */
-function payoutIfAvailable(deps: ServerDeps, amountZat: bigint): bigint | null {
-  const payout = deps.quote(amountZat);
-  const free = deps.freeInventory();
+function payoutIfAvailable(deps: ServerDeps, amountZat: bigint, chain: Chain = "solana"): bigint | null {
+  const payout = deps.quote(amountZat, chain);
+  const free = deps.freeInventory(chain);
   return payout !== null && free !== null && payout <= free ? payout : null;
 }
 
@@ -141,8 +154,8 @@ function payoutIfAvailable(deps: ServerDeps, amountZat: bigint): bigint | null {
  * free inventory, which is already net of the reserve and open orders. Payouts grow
  * with the amount, so a doubling then binary search over whole steps finds it.
  */
-function maxZat(deps: ServerDeps): bigint {
-  const fits = (steps: bigint) => payoutIfAvailable(deps, steps * STEP_ZAT) !== null;
+function maxZat(deps: ServerDeps, chain: Chain = "solana"): bigint {
+  const fits = (steps: bigint) => payoutIfAvailable(deps, steps * STEP_ZAT, chain) !== null;
   if (!fits(1n)) return 0n;
   let lo = 1n;
   let hi = 2n;
@@ -160,21 +173,17 @@ function maxZat(deps: ServerDeps): bigint {
 
 function getLimits(res: ServerResponse, deps: ServerDeps) {
   const usd = deps.usdPerZec();
-  if (deps.freeInventory() === null || deps.quote(1n) === null || usd === null) {
-    return send(res, 503, { error: "not_ready" });
-  }
-  send(res, 200, {
-    min_zec: zatToZec(MIN_ZAT),
-    max_zec: zatToZec(maxZat(deps)),
-    step_zec: zatToZec(STEP_ZAT),
-    indicative_usd_per_zec: usd,
-  });
+  if (!chainReady(deps, "solana") || usd === null) return send(res, 503, { error: "not_ready" });
+  const range = (chain: Chain) => ({ min_zec: zatToZec(MIN_ZAT), max_zec: zatToZec(maxZat(deps, chain)), step_zec: zatToZec(STEP_ZAT) });
+  const chains: Record<string, unknown> = {};
+  for (const c of deps.chains ?? ["solana"]) if (chainReady(deps, c)) chains[c] = range(c);
+  send(res, 200, { ...range("solana"), indicative_usd_per_zec: usd, chains });
 }
 
 function getBuckets(res: ServerResponse, deps: ServerDeps) {
   // Until both a price and the hot wallet balance are known, say so rather than
   // reporting every bucket as unavailable.
-  if (deps.freeInventory() === null || deps.quote(1n) === null) return send(res, 503, { error: "not_ready" });
+  if (!chainReady(deps, "solana")) return send(res, 503, { error: "not_ready" });
   const buckets = Object.entries(BUCKETS).map(([bucket_zec, zat]) => ({
     bucket_zec,
     available: payoutIfAvailable(deps, zat) !== null,
@@ -194,19 +203,23 @@ async function postOrder(req: IncomingMessage, res: ServerResponse, deps: Server
   if (amountZat === null || !onGrid(amountZat)) {
     return send(res, 400, { error: legacy ? "invalid_bucket" : "invalid_amount" });
   }
+  const chain = legacy ? "solana" : chainOf(body);
+  if (chain === null) return send(res, 400, { error: "invalid_chain" });
+  if (chain !== "solana" && !chainReady(deps, chain)) return send(res, 503, { error: "chain_unavailable" });
   if (deps.book.openCount() >= deps.maxOpenOrders) return send(res, 503, { error: "busy" });
 
-  if (deps.quote(amountZat) === null) return send(res, 503, { error: "no_price" });
+  if (deps.quote(amountZat, chain) === null) return send(res, 503, { error: "no_price" });
   // Payouts grow with the amount, so this is exactly "above the current max_zec".
-  const payout = payoutIfAvailable(deps, amountZat);
+  const payout = payoutIfAvailable(deps, amountZat, chain);
   if (payout === null) return send(res, 409, { error: legacy ? "bucket_unavailable" : "amount_unavailable" });
 
-  const o = deps.book.create(amountZat, payout, deps.quoteTtlSecs);
+  const o = deps.book.create(amountZat, payout, deps.quoteTtlSecs, chain);
   send(res, 201, {
     order_id: o.order_id,
     deposit_ua: deps.depositUa,
     amount_zec: o.amount_zec,
-    payout_lamports: o.payout_lamports,
+    chain,
+    [payoutField(chain)]: o.payout_lamports,
     quote_expires_at: o.quote_expires_at,
   });
 }
@@ -220,7 +233,10 @@ async function postTokenOrder(res: ServerResponse, deps: ServerDeps, body: Recor
   if (deps.mint === null) return send(res, 503, { error: "mint_unavailable" });
   const amountZat = typeof body.amount_zec === "string" ? zecToZat(body.amount_zec) : null;
   if (amountZat === null || !onGrid(amountZat)) return send(res, 400, { error: "invalid_amount" });
-  if (typeof body.burner !== "string" || !isValidBurner(body.burner)) return send(res, 400, { error: "invalid_burner" });
+  const chain = chainOf(body);
+  if (chain === null) return send(res, 400, { error: "invalid_chain" });
+  if (typeof body.burner !== "string" || !isValidRecipient(chain, body.burner)) return send(res, 400, { error: "invalid_burner" });
+  if (chain !== "solana" && !chainReady(deps, chain)) return send(res, 503, { error: "chain_unavailable" });
 
   const tokens = parseTokens(body.tokens, deps.mint.kLen);
   if (tokens === null || BigInt(tokens.length) * CREDIT_ZAT !== amountZat) return send(res, 400, { error: "invalid_tokens" });
@@ -232,18 +248,20 @@ async function postTokenOrder(res: ServerResponse, deps: ServerDeps, body: Recor
 
   const r = deps.book.spendTokens({
     tokenHashes: hashes,
-    spendKey: sha256(Buffer.from(`${[...hashes].sort().join(",")}|${amountZat}|${body.burner}`)),
+    // Solana keeps its v1.3 key, so a retry from before v1.4 still finds its order.
+    spendKey: sha256(Buffer.from(`${[...hashes].sort().join(",")}|${amountZat}|${body.burner}${chain === "solana" ? "" : `|${chain}`}`)),
     amountZat,
     burner: body.burner,
+    chain,
     maxOpen: deps.maxOpenOrders,
-    quote: () => deps.quote(amountZat),
+    quote: () => deps.quote(amountZat, chain),
     fits: (lamports) => {
-      const free = deps.freeInventory();
+      const free = deps.freeInventory(chain);
       return free !== null && lamports <= free;
     },
   });
   if (r.kind === "created" || r.kind === "retried") {
-    return send(res, 201, { order_id: r.orderId, payout_lamports: r.payoutLamports.toString() });
+    return send(res, 201, { order_id: r.orderId, chain, [payoutField(chain)]: r.payoutLamports.toString() });
   }
   // token_spent and amount_unavailable are 409; busy and no_price are 503. Nothing was spent.
   send(res, r.kind === "busy" || r.kind === "no_price" ? 503 : 409, { error: r.kind });

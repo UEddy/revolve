@@ -66,6 +66,10 @@ Request:
 - Payout after a random 60 to 300 second delay (breaks request-to-payout timing). No Zcash confirmations needed: credits are already backed.
 - Spent-token hashes are kept forever (double-spend protection). No IP, user agent or timing stored.
 
+## Spending on Base (v1.4)
+
+The spend form takes an optional `"chain"` (see API_CONTRACT.md v1.4). With `"chain": "base"`, `burner` is the fresh wallet's EIP-55 checksummed address and the 201 carries `payout_wei` instead of `payout_lamports`. `invalid_chain`, `invalid_burner` and `chain_unavailable` leave every token unspent. The spend key covers the chain too, so an exact retry still finds its order.
+
 ## Privacy and trust (README)
 
 - Unlinkable: blind signatures mean the server cannot tell which deposit minted a token, nor link two buys by their tokens.
