@@ -191,7 +191,7 @@ IP addresses (never logged), public payouts and cash-in transfers, and withdrawa
 **Can bad actors use it to launder money?**
 Not with outside money: Revolve only takes coins back from wallets it paid into, up to twice what it paid them, so stolen funds can't be turned into credits and private ZEC. Everything is capped per payment and per day. The remaining edge case is stated in [Abuse protections](#abuse-protections).
 
-**What if your server is hacked?**
+**What if the server is hacked?**
 The deposit address's spending key isn't on it, so deposits are safe. The hot wallets are on it, but each holds little, has a daily cap, and withdrawals wait 20 to 120 minutes. A stolen mint key could forge credits, bounded by those same wallets and caps.
 
 **What if I lose my phone?**
