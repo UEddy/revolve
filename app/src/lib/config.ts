@@ -27,6 +27,9 @@ export const MOCK = ORDER_API === "mock";
 export const RELAY = relayUrl.replace(/\/$/, "") || "/api";
 
 
+/** Base is browse-only for now: token pages and prices, no buying (the worker has no Base hot wallet). */
+export const BASE_BUYING = false;
+
 export const SOL_MINT = "So11111111111111111111111111111111111111112";
 /** Wormhole ETH on Solana: its Jupiter price stands in for ETH/USD (Ethereum and Robinhood Chain NFT floors). */
 export const ETH_MINT = "7vfCXTUXx5WJV5JADk17DUJ4ksgau7utNKj4b963voxs";
