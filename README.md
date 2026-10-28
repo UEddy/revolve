@@ -25,7 +25,7 @@ From one app on your phone you can:
 - **Buy any Solana token or tokenized stock with liquidity** (via Jupiter), paid in shielded ZEC. Live.
 - **Browse tokens on Base**: a hand-checked list, or any token by its contract address, with KyberSwap prices. Read only for now: buying is built end to end (ETH payout to a fresh Base wallet, the phone signs a KyberSwap buy) but switched off until its hot wallet is funded and tested.
 - **Browse** prediction markets (Polymarket) and NFT collections on Solana, Ethereum and Robinhood Chain. Live, read only: these cards say "Buying coming soon".
-- **Sell** a position to SOL (or ETH on Base) inside its own wallet, **send** it out, or **cash out privately**: the coin goes back to Revolve for blind-signed credits, at once or in random parts over hours, and you **withdraw** credits to your shielded Zcash address whenever you like. On Solana, Zodl's built-in Swap stays as a faster second route. New: the first mainnet run of both is still to come.
+- **Sell** a position to SOL (or ETH on Base) inside its own wallet, **send** it out, or **cash out privately**: the coin goes back to Revolve for blind-signed credits, at once or in random parts over hours, and you **withdraw** credits to your shielded Zcash address whenever you like. On Solana, Zodl's built-in Swap stays as a faster second route. Cashing out to credits has run on mainnet (see below); the first withdrawal is next.
 
 No bridge UI, no chain selection, no wallet connection, no gas: each position's wallet gets a small SOL reserve with the payout, and the app signs everything on the device.
 
@@ -83,11 +83,12 @@ Why a ZEC hot wallet is on the server now, and why it's acceptable:
 ## Why it does not leak
 
 - **Nothing public on Zcash.** Fully shielded payment to an Orchard-only address: no public amount, no public sender, encrypted memo.
+- **One deposit address for everyone.** There are no accounts, so there are no per-user addresses: every payment, a funding or a single buy, goes to the same shielded deposit address. It is matched by its exact amount and its memo, which names that one funding or order by a random id made for it (`rv1f|rf_…` for a funding), never a person. On chain the address, amount and memo are all hidden, so separate addresses would hide nothing more; and to Revolve, an address per user would tag every funding with the same person, the very link the blind credits exist to break.
 - **The server can't move deposits.** It holds only a view-only key for the deposit address; that spending key is not on the server. Withdrawals come from a separate, capped hot wallet (see above).
 - **Exits leave no trail.** Cashing out to blind-signed credits and withdrawing later means no swap provider ever links a position to your Zcash address, and Revolve can't either.
 - **The server isn't told what you buy.** An order carries an amount and a fresh wallet, never a token; the buy happens on the phone.
-- **A fresh wallet per position.** Every buy lands in its own new wallet, funded by the shared payout wallet like every other Revolve user's.
-- **Keys sealed by your passkey.** The vault is AES-GCM encrypted with a key derived from the passkey (WebAuthn PRF). No password, no seed phrase, no copy on any server.
+- **A fresh wallet per position.** Every buy lands in its own new wallet, funded by the shared payout wallet like every other Revolve user's. Its key is 32 bytes drawn at random on the phone (`crypto.getRandomValues`), never derived from the passkey, a seed or another position, so two phones, or two positions on one phone, can't end up with the same wallet (the odds are about 1 in 2^256).
+- **Keys sealed by your passkey.** The passkey doesn't make the wallets, it locks them: the vault is AES-256-GCM encrypted with a key derived (HKDF-SHA256) from the passkey's WebAuthn PRF output. That output comes from a secret each passkey creates for itself when it is made, so every passkey opens only its own vault, even though the PRF input is the same public constant for everyone. No password, no seed phrase, no copy on any server.
 - **No accounts, no IP logs.** Orders hold no IP, user agent or creation time. The relay and worker don't log requests, and the reverse proxy has access logs off.
 - **Mappings deleted after payout.** Once an order is paid, its row is deleted; only a hash of the note remains, so a re-emitted note isn't paid twice.
 - **Staggered balance checks.** The phone checks one wallet at a time, with gaps between them, so the RPC never sees all your wallets at once.
