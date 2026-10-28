@@ -3,7 +3,7 @@ import { createServer, type IncomingMessage, type ServerResponse } from "node:ht
 import { isChain, isValidRecipient, payoutField, type Chain } from "./chains.ts";
 import { CASHIN_GRACE_SECS, FUND_MAX_ZAT, isFundId } from "./funds.ts";
 import type { CashinRail } from "./cashin.ts";
-import { isWithdrawalId, looksLikeUa, type WithdrawBook, type ZecPayer } from "./withdrawals.ts";
+import { WITHDRAW_FEE_ZAT, isWithdrawalId, looksLikeUa, type WithdrawBook, type ZecPayer } from "./withdrawals.ts";
 import { CREDIT_ZAT, TOKEN_MSG_BYTES, b64, type Mint } from "./mint.ts";
 import {
   BUCKETS,
@@ -27,6 +27,8 @@ export interface ServerDeps {
   quote: (amountZat: bigint, chain: Chain) => bigint | null;
   /** Indicative USD per ZEC for display, or null when no price is available. */
   usdPerZec: () => string | null;
+  /** The spread taken from every payout, in basis points, for the app's estimates (default 150). */
+  spreadBps?: number;
   /** Payout units free to promise to new orders on a chain, or null if unknown. */
   freeInventory: (chain: Chain) => bigint | null;
   /** Chains with a configured hot wallet (default: Solana only). Others answer chain_unavailable. */
@@ -165,7 +167,7 @@ function payoutIfAvailable(deps: ServerDeps, amountZat: bigint, chain: Chain = "
 }
 
 /**
- * Largest grid amount whose payout (spread and swap fee allowance included) fits the
+ * Largest grid amount whose payout (after the spread) fits the
  * free inventory, which is already net of the reserve and open orders. Payouts grow
  * with the amount, so a doubling then binary search over whole steps finds it.
  */
@@ -199,7 +201,13 @@ function getLimits(res: ServerResponse, deps: ServerDeps) {
       if (per != null) cashin[c] = { per_credit: per.toString() };
     }
   }
-  send(res, 200, { ...range("solana"), indicative_usd_per_zec: usd, chains, ...(Object.keys(cashin).length ? { cashin } : {}) });
+  send(res, 200, {
+    ...range("solana"),
+    indicative_usd_per_zec: usd,
+    spread_bps: deps.spreadBps ?? 150,
+    chains,
+    ...(Object.keys(cashin).length ? { cashin } : {}),
+  });
 }
 
 function getBuckets(res: ServerResponse, deps: ServerDeps) {
@@ -369,7 +377,8 @@ async function postWithdrawal(req: IncomingMessage, res: ServerResponse, deps: S
   for (const t of tokens) {
     if (!(await deps.mint.verify(t.msg, t.sig))) return send(res, 400, { error: "invalid_tokens" });
   }
-  const amountZat = BigInt(tokens.length) * CREDIT_ZAT;
+  // The network fee comes out of the amount, like any wallet's: a withdrawal never costs Revolve.
+  const amountZat = BigInt(tokens.length) * CREDIT_ZAT - WITHDRAW_FEE_ZAT;
   const r = w.book.create({
     tokenHashes: hashes,
     spendKey: sha256(Buffer.from(`${[...hashes].sort().join(",")}|withdraw|${address}`)),

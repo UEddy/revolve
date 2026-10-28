@@ -128,8 +128,9 @@ grep -E '^(EVM_KEY_PATH|BASE_)' /opt/revolve/worker/.env  # stage.sh writes thes
 
 Send ETH **on Base** to the printed address. Base inventory is
 min(balance, `BASE_HOT_WALLET_CAP_WEI`) less `BASE_RESERVE_WEI` (0.0002 ETH by
-default, for payout gas). Each payout adds `BASE_GAS_ALLOWANCE_WEI` (0.00003 ETH)
-for the fresh wallet's own swap gas.
+default, for payout gas). Payouts add nothing for the fresh wallet's gas: the app
+keeps a little of each payout for it. (`SWAP_FEE_LAMPORTS` and
+`BASE_GAS_ALLOWANCE_WEI` are no longer read; the worker logs a line if they are set.)
 
 ## D5d [droplet] Withdrawal hot wallet (optional)
 

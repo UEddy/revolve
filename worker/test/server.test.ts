@@ -81,8 +81,8 @@ test("GET /buckets is 503 until price and balance are loaded", () =>
 
 const post = (base: string, body: unknown) => fetch(`${base}/orders`, { method: "POST", body: JSON.stringify(body) });
 
-test("GET /limits: grid, max rounded down to the step after the fee allowance", () =>
-  // 0.005 pays 50M + 5M = 55M and fits 57M; 0.006 pays 65M and does not.
+test("GET /limits: grid, max rounded down to the step, and the spread for estimates", () =>
+  // With this quote 0.005 pays 50M + 5M = 55M and fits 57M; 0.006 pays 65M and does not.
   withApi(
     57_000_000n,
     async (base) => {
@@ -94,6 +94,7 @@ test("GET /limits: grid, max rounded down to the step after the fee allowance", 
         max_zec: "0.005",
         step_zec: "0.001",
         indicative_usd_per_zec: "1224.50",
+        spread_bps: 150,
         chains: { solana: { min_zec: "0.002", max_zec: "0.005", step_zec: "0.001" } },
       });
     },
@@ -107,6 +108,7 @@ test("GET /limits: max below min when inventory is short, large max when plentif
       max_zec: "0.001",
       step_zec: "0.001",
       indicative_usd_per_zec: "1224.50",
+      spread_bps: 150,
       chains: { solana: { min_zec: "0.002", max_zec: "0.001", step_zec: "0.001" } },
     });
   });

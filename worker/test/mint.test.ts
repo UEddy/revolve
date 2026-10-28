@@ -611,7 +611,7 @@ test("withdrawals: credits spent and queued in one step, exact retry finds it, n
       assert.equal(ok.status, 201);
       const w = (await ok.json()) as { withdrawal_id: string; amount_zec: string; status: string };
       assert.match(w.withdrawal_id, /^rw_[0-9a-z]{10}$/);
-      assert.deepEqual([w.amount_zec, w.status], ["0.003", "queued"]);
+      assert.deepEqual([w.amount_zec, w.status], ["0.0029", "queued"], "3 credits less the 0.0001 ZEC network fee");
       assert.equal(spent(), 3);
       assert.deepEqual(await (await json(base, "/withdrawals", { tokens: [ts[2], ts[0], ts[1]], address: UA })).json(), w);
       assert.equal(spent(), 3);
@@ -620,7 +620,7 @@ test("withdrawals: credits spent and queued in one step, exact retry finds it, n
       const reuse = await json(base, "/orders", { amount_zec: "0.003", tokens: ts, burner });
       assert.deepEqual(await reuse.json(), { error: "token_spent" }, "withdrawn credits can't be spent again");
 
-      // 0.5 ZEC hot wallet: 0.003 queued, 0.0005 kept for fees, so 0.5 more doesn't fit.
+      // 0.005 ZEC hot wallet: 0.0029 queued, 0.0005 kept for fees, so 0.0499 more doesn't fit.
       const big = await json(base, "/withdrawals", { tokens: await tokens(50), address: UA });
       assert.equal(big.status, 503);
       assert.deepEqual(await big.json(), { error: "withdraw_unavailable" });
