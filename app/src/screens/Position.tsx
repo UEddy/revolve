@@ -12,7 +12,7 @@ import { positionRisk } from "../lib/coach.ts";
 import { MOCK, SOL_MINT } from "../lib/config.ts";
 import { amount, countdown, usd, units } from "../lib/format.ts";
 import type { Position } from "../lib/model.ts";
-import { Meter, Sheet, Spinner, TokenIcon, TopBar, errorText } from "../components/bits.tsx";
+import { CANCELLED_TEXT, CancelPayment, Meter, Sheet, Spinner, TokenIcon, TopBar, errorText } from "../components/bits.tsx";
 import { Check } from "../components/icons.tsx";
 import { PayCard } from "../components/PayCard.tsx";
 import { href, go } from "../router.ts";
@@ -74,7 +74,8 @@ function Steps({ p }: { p: Position }) {
 
 export function PositionScreen({ id }: { id: string }) {
   const { data, updatePosition, confirm } = useVault();
-  const { prices, busy, retrySwap, sell, priceOf } = useEngine();
+  const { prices, busy, retrySwap, sell, cancel, priceOf } = useEngine();
+  const [cancelled, setCancelled] = useState(false);
   const [sending, setSending] = useState(false);
   const [selling, setSelling] = useState(false);
   const [cashingOut, setCashingOut] = useState(false);
@@ -89,6 +90,18 @@ export function PositionScreen({ id }: { id: string }) {
       priceOf(SOL_MINT);
     }
   }, [mint, priceOf]);
+  if (!p && cancelled) {
+    return (
+      <div className="screen">
+        <TopBar title="" />
+        <div className="card flat">
+          <h3>Payment cancelled</h3>
+          <p className="muted">{CANCELLED_TEXT}</p>
+          <a className="btn ghost" href={href.home}>Back to portfolio</a>
+        </div>
+      </div>
+    );
+  }
   if (!p) return <div className="screen"><TopBar title="" /><p className="empty">This position is not in your vault.</p></div>;
 
   const held = units(p.balance?.tokenRaw ?? p.swap?.outAmount, p.token.decimals);
@@ -155,6 +168,12 @@ export function PositionScreen({ id }: { id: string }) {
               expiresAt={p.order.quoteExpiresAt}
               memoNote="The message tells the payout where to go and is encrypted on chain."
             />
+          )}
+          {p.stage === "awaiting_payment" && !p.paidWith && (
+            <>
+              <div className="spacer" />
+              <CancelPayment what="order and its new wallet" run={() => cancel(p.id).then(() => setCancelled(true))} />
+            </>
           )}
           {p.stage === "expired" && (
             <div className="card flat">

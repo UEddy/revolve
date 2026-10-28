@@ -46,6 +46,9 @@ CREATE TABLE IF NOT EXISTS fund_orders (
 );
 -- SHA-256 of every spent token message, kept forever against double spends.
 CREATE TABLE IF NOT EXISTS spent_tokens (token_hash TEXT PRIMARY KEY);
+-- SHA-256 of cancelled order and funding ids, so a payment that still arrives
+-- for one is held for review as paid_after_cancel. Nothing else is kept.
+CREATE TABLE IF NOT EXISTS cancelled_ids (id_hash TEXT PRIMARY KEY);
 `;
 
 export function openDb(path: string): DatabaseSync {

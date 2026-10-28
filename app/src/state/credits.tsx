@@ -10,7 +10,7 @@ import { random } from "../lib/bytes.ts";
 import { MOCK } from "../lib/config.ts";
 import { parseZec } from "../lib/amount.ts";
 import { afterSignError, balanceCredits, blindFor, creditsFor, importMintKey, keyFingerprint, tokensAfter, unblindAll } from "../lib/credits.ts";
-import { createFunding, getFunding, getMintKey, signFunding, spend, type MintKey } from "../lib/mint.ts";
+import { cancelFunding, createFunding, getFunding, getMintKey, signFunding, spend, type MintKey } from "../lib/mint.ts";
 import { OrderApiError } from "../lib/orders.ts";
 import { creditsOf, type CreditToken, type Credits, type Funding, type TokenRef } from "../lib/model.ts";
 
@@ -40,6 +40,8 @@ type CreditsApi = {
   balance: number;
   /** Starts a funding; returns its id. Pass `acceptKey` to re-pin after the user agreed to a key change. */
   startFunding(amountZec: string, acceptKey?: MintKey): Promise<string>;
+  /** Cancels an unpaid funding and drops it from the vault; throws (and keeps it) if a payment was already seen. */
+  cancelFunding(fundId: string): Promise<void>;
   /** Spends credits on a buy after a fresh passkey check; returns the new position's id. */
   spendOnOrder(token: TokenRef, amountZec: string): Promise<string>;
 };
@@ -97,6 +99,24 @@ export function CreditsProvider({ children }: { children: ReactNode }) {
       return q.fund_id;
     },
     [update],
+  );
+
+  const cancel = useCallback(
+    async (fundId: string) => {
+      const f = latest.current?.fundings.find((x) => x.fundId === fundId);
+      if (!f || f.status !== "awaiting_payment") throw new Error("Only an unpaid funding can be cancelled.");
+      const r = await cancelFunding(fundId);
+      if (r === "processing") {
+        await updateFunding(fundId, (x) => void (x.status = "seen"));
+        throw new OrderApiError("A payment for this funding has already been seen, so it can't be cancelled. It's already being processed.", 409, "payment_seen");
+      }
+      if (r === "unknown") throw new OrderApiError("Revolve has no open record of this funding, so nothing was cancelled.", 404, "not_found");
+      await update((d) => {
+        const c = creditsOf(d);
+        c.fundings = c.fundings.filter((x) => x.fundId !== fundId);
+      });
+    },
+    [update, updateFunding],
   );
 
   /** Blind, get signed, unblind, verify, store. The blinding state is sealed before the blinded messages are sent. */
@@ -339,8 +359,8 @@ export function CreditsProvider({ children }: { children: ReactNode }) {
   }, [!!data, send]);
 
   const api = useMemo<CreditsApi>(
-    () => ({ credits, balance: balanceCredits(credits), startFunding, spendOnOrder }),
-    [credits, startFunding, spendOnOrder],
+    () => ({ credits, balance: balanceCredits(credits), startFunding, cancelFunding: cancel, spendOnOrder }),
+    [credits, startFunding, cancel, spendOnOrder],
   );
   return <Ctx.Provider value={api}>{children}</Ctx.Provider>;
 }

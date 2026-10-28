@@ -43,27 +43,22 @@ export async function qrPng(qr: Qr): Promise<Blob> {
   return new Promise((resolve, reject) => canvas.toBlob((b) => (b ? resolve(b) : reject(new Error("could not draw the QR code"))), "image/png"));
 }
 
+/** The saved file's name: never the order id, which would sit in the gallery next to the payment. */
+export const QR_FILENAME = "revolve-payment-qr.png";
+
 /**
- * Hands the PNG to the share sheet ("Save Image" on iPhone, Photos or Files on
- * Android), or downloads it where files can't be shared. The name carries no
- * order id. Returns false when the person closed the share sheet.
+ * iPhone only: the share sheet, whose "Save Image" is the way into Photos there.
+ * (On Android it offers only apps and contacts, so Android downloads instead.)
+ * Returns false when the person closed the sheet.
  */
-export async function saveQr(png: Blob): Promise<boolean> {
-  const file = new File([png], "revolve-payment-qr.png", { type: "image/png" });
-  if (navigator.canShare?.({ files: [file] })) {
-    try {
-      await navigator.share({ files: [file] });
-      return true;
-    } catch (e) {
-      if (e instanceof DOMException && e.name === "AbortError") return false;
-      throw e;
-    }
+export async function shareQr(png: Blob): Promise<boolean> {
+  const file = new File([png], QR_FILENAME, { type: "image/png" });
+  if (!navigator.canShare?.({ files: [file] })) throw new Error("This browser can't share images. Long-press the code and save it instead.");
+  try {
+    await navigator.share({ files: [file] });
+    return true;
+  } catch (e) {
+    if (e instanceof DOMException && e.name === "AbortError") return false;
+    throw e;
   }
-  const url = URL.createObjectURL(png);
-  const a = document.createElement("a");
-  a.href = url;
-  a.download = file.name;
-  a.click();
-  setTimeout(() => URL.revokeObjectURL(url), 30_000);
-  return true;
 }

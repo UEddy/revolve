@@ -1,7 +1,7 @@
 import { randomBytes } from "node:crypto";
 import type { DatabaseSync } from "node:sqlite";
 import { CREDIT_ZAT } from "./mint.ts";
-import { REQUIRED_CONFS, type NoteLine } from "./orders.ts";
+import { REQUIRED_CONFS, cancelRow, wasCancelled, type CancelResult, type NoteLine } from "./orders.ts";
 
 // Credit fundings (CREDITS_CONTRACT.md v1.3). A funding is matched like an order,
 // on memo fund_id and exact amount, and becomes `funded` at 3 confirmations. Its
@@ -97,6 +97,11 @@ export class FundBook {
     return Number(r.changes) === 1;
   }
 
+  /** Cancels an unpaid funding, as OrderBook.cancel does for orders. */
+  cancel(fundId: string): CancelResult {
+    return cancelRow(this.db, "fund_orders", "fund_id", fundId);
+  }
+
   expire(): void {
     this.db
       .prepare("UPDATE fund_orders SET status = 'expired' WHERE status = 'awaiting_payment' AND expires_at <= ?")
@@ -118,7 +123,7 @@ export class FundBook {
   onNote(key: string, n: NoteLine, fundId: string | null): string | null {
     if (fundId === null) return "malformed_memo";
     const fund = this.row(fundId);
-    if (!fund) return "unknown_fund";
+    if (!fund) return wasCancelled(this.db, fundId) ? "paid_after_cancel" : "unknown_fund";
     if (fund.status !== "awaiting_payment" && fund.status !== "expired") return "duplicate_payment";
 
     let reason: string | null = null;

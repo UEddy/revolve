@@ -420,3 +420,29 @@ test("token orders pay after a random 60-300 s delay, without confirmations", ()
   assert.equal(book.due().length, 40, "all due by 300 s");
   assert.ok(delays.size > 5, "delays are spread out");
 });
+
+test("DELETE /mint/orders/:id cancels an unpaid funding; 409 once a payment is seen; a late payment goes to review", () =>
+  withMintApi(async ({ base, book }) => {
+    const create = async () => ((await (await json(base, "/mint/orders", { amount_zec: "0.003" })).json()) as { fund_id: string }).fund_id;
+    const del = (id: string) => fetch(`${base}/mint/orders/${id}`, { method: "DELETE" });
+
+    const id = await create();
+    assert.equal(book.funds.openCount(), 1);
+    assert.equal((await del(id)).status, 204);
+    assert.equal(book.funds.openCount(), 0, "no longer counts toward the open cap");
+    assert.equal((await fetch(`${base}/mint/orders/${id}`)).status, 404, "record deleted");
+    assert.equal((await del(id)).status, 404);
+    assert.equal((await del("rf_0000000000")).status, 404);
+
+    book.onNote(note(`rv1f|${id}`, 300_000, 5, "0a".repeat(32)));
+    assert.deepEqual(book.reviewNotes().map((n) => n.reason), ["paid_after_cancel"]);
+
+    const seen = await create();
+    book.onNote(note(`rv1f|${seen}`, 300_000, 0, "0b".repeat(32)));
+    const r = await del(seen);
+    assert.equal(r.status, 409);
+    assert.deepEqual(await r.json(), { error: "payment_seen" });
+    book.onNote(note(`rv1f|${seen}`, 300_000, 3, "0b".repeat(32)));
+    assert.equal(book.funds.get(seen)!.status, "funded");
+    assert.equal((await del(seen)).status, 409, "funded is past cancelling too");
+  }));
