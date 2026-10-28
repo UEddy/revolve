@@ -169,6 +169,52 @@ The withdrawal spends only Orchard notes and pays only an Orchard receiver, so n
 
 [NEAR Intents](https://docs.near-intents.org) swaps ZEC into another chain's asset through a network of solvers, and the result goes to an address you supply. As shown above, the ZEC leaves Zcash through a deshielding transaction: the amount and time become public and can be matched to the swap on the other side. Revolve keeps the payment fully shielded, to an Orchard-only address with an encrypted memo, so nothing about it is public on Zcash. It is also a consumer app rather than a swap route: you pick the token or stock itself, and it arrives in a fresh wallet that holds that one position and is unlinked to your others. And with credits, even the order server can't link your buys to your deposit or to each other.
 
+## FAQ
+
+Short answers to the questions we expect; each links to the full story.
+
+**Why not just use Zodl's built-in Swap or NEAR Intents?**
+They deshield: the ZEC leaves through a public transparent output whose amount and time can be matched to the swap on the other chain ([proven above](#the-problem-proven-on-mainnet)), and the swap provider sees both ends. Revolve pays and withdraws fully shielded, and no third party learns both ends.
+
+**Is Revolve custodial?**
+Yes, at three points: between your deposit and the payout, for credits until they're spent or withdrawn, and in its hot wallets. Each is capped and stated in [Trust boundaries](#trust-boundaries); [Path to trustless](#path-to-trustless) is how it goes away.
+
+**What do blind-signed credits buy you?**
+The server signs credit tokens without ever seeing them (RFC 9474), so when they come back, for a buy or a withdrawal, Revolve can't tell which funding or cash-out they came from. Without them, Revolve would hold the record linking your deposits, your positions and your exits.
+
+**Why one deposit address for everyone, not one per user?**
+On Zcash the address, amount and memo are all hidden anyway, so separate addresses would hide nothing more on chain; and to Revolve, an address per user would tie every funding to the same person. Payments are matched by a random id in the encrypted memo, never by who you are.
+
+**How do you stop amount and timing on Solana from matching the shielded side?**
+There's nothing public on the Zcash side to match against: both the payment in and the withdrawal out are fully shielded. On Solana, amounts sit on a 0.001 ZEC grid, payouts wait 3 confirmations plus a random 2 to 6 blocks (or a random 60 to 300 seconds with credits), gradual cash-outs go in 3 to 6 random parts over 2 to 8 hours, withdrawals wait a random 20 to 120 minutes, and the coach warns before moves that would line up. See [Cashing out without a trail](#cashing-out-without-a-trail).
+
+**What can Revolve itself see?**
+IP addresses (never logged), public payouts and cash-in transfers, and withdrawal amounts and times. It can't link a spent or withdrawn credit to the funding or cash-out that minted it. While few people use Revolve, timing and amounts still narrow things down, and the README says so ([Trust boundaries](#trust-boundaries)).
+
+**Can criminals use it to launder money?**
+Not with outside money: Revolve only takes coins back from wallets it paid into, up to twice what it paid them, so stolen funds can't be turned into credits and private ZEC. Everything is capped per payment and per day. The remaining edge case is stated in [Abuse protections](#abuse-protections).
+
+**What if your server is hacked?**
+The deposit address's spending key isn't on it, so deposits are safe. The hot wallets are on it, but each holds little, has a daily cap, and withdrawals wait 20 to 120 minutes. A stolen mint key could forge credits, bounded by those same wallets and caps.
+
+**What if I lose my phone?**
+Settings → "Save encrypted backup" gives you a file that is useless without your passkey. On a new phone, "Restore from backup" with the same passkey (synced by Google Password Manager or iCloud Keychain) brings back every wallet and credit. Without a backup, they're gone: nothing is ever stored on a server.
+
+**Why a web app (PWA) and not an app-store app?**
+Passkeys with the WebAuthn PRF extension work in Chrome on Android and Safari on iPhone, so the vault needs no app store, account or seed phrase. The trade-off is trusting the hosted code, which reproducible, hash-pinned builds address ([Path to trustless](#path-to-trustless)).
+
+**Why Solana first?**
+Jupiter routes almost any token and tokenized stocks, fees are a fraction of a cent, and swaps land in seconds. Base is built on the same rules and browse-only until its hot wallet is funded and tested.
+
+**What's Ironwood?**
+The shielded pool NU6.3 activated on mainnet (block 3,428,143). Revolve's addresses carry only an Orchard receiver, so payments to them land in Ironwood, and the watcher and the withdrawal wallet sync the Ironwood tree.
+
+**How does it make money?**
+A 1.5% spread on buys and on cash-outs to credits; network fees are paid by whoever's transaction it is. See [Business model and unit economics](#business-model-and-unit-economics).
+
+**What would you do next?**
+Trust-minimised custody first (keys split across independent people, proof of reserves, pinned builds), then trustless swaps with an audit, then routing the app over Tor or Oblivious HTTP, and the products in the [Roadmap](#roadmap).
+
 ## Business model and unit economics
 
 Revolve earns the way an exchange desk does: a spread on the conversions it performs. No accounts, no ads, no data: it keeps too little about its users to sell anything else, which is the point. **No flow costs Revolve more than it earns**: network fees are paid by whoever's transaction it is, as in any wallet, and Revolve keeps the spread.
