@@ -49,9 +49,11 @@ export class ProcessZecPayer implements ZecPayer {
     return this.spendable;
   }
 
-  async send(id: string, ua: string, zat: bigint): Promise<string> {
+  async send(id: string, ua: string, zat: bigint): Promise<{ txid: string; confirmations: number }> {
     const r = await this.run(["payer-send", id, ua, zat.toString()], SEND_TIMEOUT_MS);
     if (typeof r.txid !== "string" || !/^[0-9a-f]{64}$/.test(r.txid)) throw new Error("payer-send printed no txid");
-    return r.txid;
+    // A watcher binary older than this worker prints no count; it can't say when a withdrawal is mined.
+    if (typeof r.confirmations !== "number") throw new Error("payer-send printed no confirmations: update the watcher binary (DEPLOY.md)");
+    return { txid: r.txid, confirmations: r.confirmations };
   }
 }
