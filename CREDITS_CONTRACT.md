@@ -24,7 +24,7 @@ The app pins `key_id` and refuses to mint against an unknown or changed key with
 Request: `{ "amount_zec": "0.02" }` on the 0.001 grid, min 0.002, max 0.05 per funding (custody cap).
 Response 201: `{ "fund_id": "rf_...", "deposit_ua": "u1...", "amount_zec": "0.02", "credits": 20, "expires_at": "..." }`
 - Errors: 400 `invalid_amount` (not a decimal string, off the grid, below 0.002 or above 0.05), 503 `busy` (too many open fundings).
-- A funding expires after 15 minutes, like an order quote.
+- A funding expires after 10 minutes (`QUOTE_TTL_SECS`), like an order quote. An unpaid funding counts toward nothing: only paid ones still confirming are capped (`MAX_OPEN_ORDERS`).
 Memo built by the app: `rv1f|<fund_id>` (no burner, no user data).
 The watcher/worker match on fund_id AND exact amount, same review rules as orders.
 
@@ -95,9 +95,11 @@ Request: `{ "chain": "solana", "credits": 7 }` (1 to 50 credits, the funding cap
 The app sends at least `pay_lamports` (or `pay_wei`) from the position's wallet to `pay_to` in one transfer that **names the cash-in**: a Memo-program instruction whose data is the `fund_id` on Solana, or the `fund_id` (UTF-8) as the transaction's input data on Base. Then it reports it: `{ "tx": "<Solana signature | Base tx hash>" }`. The worker looks the transaction up itself and checks: it succeeded and is confirmed, it names this `fund_id`, it raised `pay_to`'s balance by at least the quoted amount, it was mined after the quote was made and before it expired (10 minutes of grace), and it was never used for another cash-in. Transfers to the hot wallet are public, so without the name anyone could report someone else's transfer against a quote of their own.
 - 200 `{ "status": "funded" }`: the credits can be signed now.
 - 202 `{ "status": "pending" }`: not found or not confirmed yet. Report again shortly.
-- 400 `bad_tx` (failed, wrong recipient, too little, or outside the quote's window), 409 `tx_used`, 404 `not_found`, 409 `not_awaiting` (already funded, expired or cancelled).
+- 400 `bad_tx` (failed, wrong recipient, too little, or outside the quote's window), 409 `tx_used`, 404 `not_found`, 409 `not_awaiting` (already funded, expired or cancelled), 409 `price_moved` (held for review: the quote was stale, see below).
 
 Underpaid or late transfers are never minted automatically; they are refunded by hand like any other review item.
+
+A transfer is priced as of its block time, from the rates the worker saw then. If the coin had fallen against ZEC by more than 3% (`MAX_PRICE_MOVE_BPS`) since the quote, the quote was stale: the cash-in is held for review (`needs_review`, reason `price_moved`), the transaction is used up, and the answer is 409 `price_moved`. It is refunded by hand. When no rate from that moment is known (the worker restarted since), it is credited as quoted.
 
 ### POST /withdrawals
 

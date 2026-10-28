@@ -166,7 +166,7 @@ test("POST /orders: amount_zec wins over bucket_zec; legacy form takes any grid 
     assert.equal((await post(base, null)).status, 400);
   }));
 
-test("DELETE /orders/:id cancels an unpaid order and releases its inventory; 409 once a payment is seen", async () => {
+test("DELETE /orders/:id cancels an unpaid order; a quote holds inventory only once paid; 409 once a payment is seen", async () => {
   const book = new OrderBook(openDb(":memory:"));
   const server = createApi({
     book,
@@ -188,15 +188,15 @@ test("DELETE /orders/:id cancels an unpaid order and releases its inventory; 409
   const burner = "11111111111111111111111111111111";
   try {
     const first = (await (await create()).json()) as { order_id: string };
-    assert.equal(book.committedLamports(), 50_000_000n);
-    assert.equal((await create()).status, 409, "inventory is reserved by the open order");
+    assert.equal(book.committedLamports(), 0n, "an unpaid quote reserves nothing");
+    assert.equal((await create()).status, 201, "so it can't be used to lock up the hot wallet");
 
     const pre = await fetch(`${base}/orders/${first.order_id}`, { method: "OPTIONS" });
     assert.match(pre.headers.get("access-control-allow-methods")!, /DELETE/);
 
     const ok = await del(first.order_id);
     assert.equal(ok.status, 204);
-    assert.equal(book.committedLamports(), 0n, "inventory released");
+    assert.equal(book.committedLamports(), 0n);
     assert.equal((await fetch(`${base}/orders/${first.order_id}`)).status, 404, "record deleted");
     assert.deepEqual(await (await del(first.order_id)).json(), { error: "not_found" });
     assert.equal((await del("rv_0000000000")).status, 404);
@@ -210,8 +210,10 @@ test("DELETE /orders/:id cancels an unpaid order and releases its inventory; 409
 
     // Once a note is seen, cancelling is refused and the order is kept.
     const second = (await (await create()).json()) as { order_id: string };
-    assert.equal(book.committedLamports(), 50_000_000n);
+    assert.equal(book.committedLamports(), 0n);
     book.onNote({ txid: "bb".repeat(32), pool: "ironwood", output_index: 0, value: 500_000, memo: `rv1|${second.order_id}|${burner}`, height: 1, confirmations: 0 });
+    assert.equal(book.committedLamports(), 50_000_000n, "reserved once its payment is seen");
+    assert.equal((await create()).status, 409, "and new quotes see only what is left");
     const seen = await del(second.order_id);
     assert.equal(seen.status, 409);
     assert.deepEqual(await seen.json(), { error: "payment_seen" });
@@ -227,3 +229,12 @@ test("DELETE /orders/:id cancels an unpaid order and releases its inventory; 409
     server.close();
   }
 });
+
+test("unpaid quotes beyond MAX_OPEN_ORDERS are still accepted: nobody can lock others out by quoting", () =>
+  withApi(10n ** 12n, async (base) => {
+    // maxOpenOrders is 10 here; unpaid quotes don't count toward it.
+    for (let i = 0; i < 15; i++) {
+      const r = await fetch(`${base}/orders`, { method: "POST", body: JSON.stringify({ amount_zec: "0.002" }) });
+      assert.equal(r.status, 201, `quote ${i + 1}`);
+    }
+  }));

@@ -2,6 +2,7 @@ import { readFileSync } from "node:fs";
 import bs58 from "bs58";
 import { Connection, Keypair, PublicKey, SystemProgram, Transaction } from "@solana/web3.js";
 import type { OrderBook } from "./orders.ts";
+import { repriced } from "./pricing.ts";
 
 /** Pays SOL from the capped hot wallet. The key file lives outside the repo. */
 export class Payer {
@@ -46,7 +47,7 @@ export class Payer {
  * signature before broadcast, so a crash or timeout is resolved by looking the
  * signature up, never by sending a second transfer.
  */
-export type PayoutLimits = { reserve: bigint; dailyCap: bigint };
+export type PayoutLimits = { reserve: bigint; dailyCap: bigint; quote?: (amountZat: bigint) => bigint | null; maxMoveBps?: number };
 
 /**
  * What can still be promised to new orders: the hot wallet balance, but never
@@ -74,8 +75,11 @@ export function freeOnChain(balance: bigint, committed: bigint, paidToday: bigin
 export async function runPayouts(book: OrderBook, payer: Payer, limits: PayoutLimits, onlyOrderId?: string): Promise<void> {
   const { reserve, dailyCap } = limits;
   await reconcile(book, payer);
-  for (const due of book.due()) {
-    if (onlyOrderId !== undefined && due.orderId !== onlyOrderId) continue;
+  for (const quoted of book.due()) {
+    if (onlyOrderId !== undefined && quoted.orderId !== onlyOrderId) continue;
+    // Checked against the price now: a stale quote is re-priced, never paid at a loss.
+    const due = repriced(book, "solana", quoted, limits);
+    if (due === null) return;
     if (book.paidOrPayingToday() + due.lamports > dailyCap) {
       console.error("payout waiting: daily payout cap reached");
       return;

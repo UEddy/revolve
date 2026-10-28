@@ -75,7 +75,14 @@ async function tick() {
     payingBase = true;
     void basePayer
       .refreshBalance()
-      .then(() => runEvmPayouts(book, "base", basePayer, { reserve: cfg.base.reserveWei, dailyCap: cfg.base.dailyPayoutCapWei }))
+      .then(() =>
+        runEvmPayouts(book, "base", basePayer, {
+          reserve: cfg.base.reserveWei,
+          dailyCap: cfg.base.dailyPayoutCapWei,
+          quote: (zat) => pricing.payoutWei(zat),
+          maxMoveBps: cfg.maxPriceMoveBps,
+        }),
+      )
       .catch((e: unknown) => console.error(`base payout tick failed: ${(e as Error).message}`))
       .finally(() => (payingBase = false));
   }
@@ -83,7 +90,12 @@ async function tick() {
   paying = true;
   try {
     await payer.refreshBalance();
-    await runPayouts(book, payer, { reserve: cfg.solReserveLamports, dailyCap: cfg.dailyPayoutCapLamports });
+    await runPayouts(book, payer, {
+      reserve: cfg.solReserveLamports,
+      dailyCap: cfg.dailyPayoutCapLamports,
+      quote: (zat) => pricing.payoutLamports(zat),
+      maxMoveBps: cfg.maxPriceMoveBps,
+    });
   } catch (e) {
     console.error(`payout tick failed: ${(e as Error).message}`);
   } finally {
@@ -107,6 +119,8 @@ createApi({
   quote: (zat, chain) => (chain === "solana" ? pricing.payoutLamports(zat) : pricing.payoutWei(zat)),
   usdPerZec: () => pricing.indicativeUsdPerZec(),
   spreadBps: pricing.spreadBps,
+  cashinPriceAt: (chain, at) => pricing.cashinPerCreditAt(chain, CREDIT_ZAT, at),
+  maxPriceMoveBps: cfg.maxPriceMoveBps,
   mint,
   chains: basePayer ? ["solana", "base"] : ["solana"],
   cashin: {

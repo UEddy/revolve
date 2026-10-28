@@ -1,7 +1,7 @@
 import { createHash, randomBytes } from "node:crypto";
 import type { DatabaseSync } from "node:sqlite";
 import { CREDIT_ZAT } from "./mint.ts";
-import { REQUIRED_CONFS, cancelRow, wasCancelled, type CancelResult, type NoteLine } from "./orders.ts";
+import { PRUNE_UNPAID_AFTER_SECS, REQUIRED_CONFS, cancelRow, wasCancelled, type CancelResult, type NoteLine } from "./orders.ts";
 
 // Credit fundings (CREDITS_CONTRACT.md v1.3). A funding is matched like an order,
 // on memo fund_id and exact amount, and becomes `funded` at 3 confirmations. Its
@@ -27,7 +27,7 @@ interface FundRow {
 }
 
 /** A cash-in's quote, as POST /cashins/:id/sent checks a transaction against it. */
-export type CashinQuote = { status: FundStatus; source: string; payAmount: bigint; expiresAt: number };
+export type CashinQuote = { status: FundStatus; source: string; payAmount: bigint; expiresAt: number; amountZat: bigint };
 
 /** How long after its quote expires a cash-in transfer is still accepted (its transaction may land late). */
 export const CASHIN_GRACE_SECS = 600;
@@ -63,11 +63,15 @@ export class FundBook {
     this.now = now;
   }
 
-  /** Fundings still waiting for a deposit to arrive or confirm. */
+  /** Fundings paid and still confirming: what MAX_OPEN_ORDERS caps. Unpaid quotes never count (see OrderBook.openCount). */
   openCount(): number {
-    const r = this.db
-      .prepare("SELECT COUNT(*) AS n FROM fund_orders WHERE status IN ('awaiting_payment','seen')")
-      .get() as { n: number };
+    const r = this.db.prepare("SELECT COUNT(*) AS n FROM fund_orders WHERE status = 'seen'").get() as { n: number };
+    return r.n;
+  }
+
+  /** Fundings and cash-ins still waiting for a payment. */
+  unpaidCount(): number {
+    const r = this.db.prepare("SELECT COUNT(*) AS n FROM fund_orders WHERE status = 'awaiting_payment'").get() as { n: number };
     return r.n;
   }
 
@@ -131,7 +135,35 @@ export class FundBook {
 
   cashinQuote(fundId: string): CashinQuote | null {
     const r = this.row(fundId);
-    return r?.source ? { status: r.status, source: r.source, payAmount: BigInt(r.pay_amount!), expiresAt: r.expires_at } : null;
+    return r?.source ? { status: r.status, source: r.source, payAmount: BigInt(r.pay_amount!), expiresAt: r.expires_at, amountZat: BigInt(r.amount_zat) } : null;
+  }
+
+  /**
+   * A verified transfer that can't be credited automatically (the price moved
+   * too far since the quote): the transaction is used up, so it can't fund
+   * another cash-in, and the cash-in is held for review, to be refunded by hand.
+   */
+  holdCashin(fundId: string, txHash: string, reason: string): "held" | "tx_used" | "not_awaiting" {
+    this.db.exec("BEGIN IMMEDIATE");
+    try {
+      if (this.db.prepare("SELECT 1 FROM used_cashin_txs WHERE tx_hash = ?").get(txHash)) {
+        this.db.exec("ROLLBACK");
+        return "tx_used";
+      }
+      const r = this.db
+        .prepare("UPDATE fund_orders SET status = 'needs_review', review_reason = ? WHERE fund_id = ? AND source IS NOT NULL AND status = 'awaiting_payment'")
+        .run(reason, fundId);
+      if (Number(r.changes) !== 1) {
+        this.db.exec("ROLLBACK");
+        return "not_awaiting";
+      }
+      this.db.prepare("INSERT INTO used_cashin_txs VALUES (?)").run(txHash);
+      this.db.exec("COMMIT");
+      return "held";
+    } catch (e) {
+      if (this.db.isTransaction) this.db.exec("ROLLBACK");
+      throw e;
+    }
   }
 
   /**
@@ -169,6 +201,9 @@ export class FundBook {
     this.db
       .prepare("UPDATE fund_orders SET status = 'expired' WHERE status = 'awaiting_payment' AND expires_at + (CASE WHEN source IS NULL THEN 0 ELSE ? END) <= ?")
       .run(CASHIN_GRACE_SECS, Math.floor(this.now() / 1000));
+    this.db
+      .prepare("DELETE FROM fund_orders WHERE status = 'expired' AND note_key IS NULL AND expires_at <= ?")
+      .run(Math.floor(this.now() / 1000) - PRUNE_UNPAID_AFTER_SECS);
   }
 
   /** True if this note already belongs to a funding (its confirmations were updated). */
