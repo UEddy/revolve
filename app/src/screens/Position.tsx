@@ -156,6 +156,7 @@ export function PositionScreen({ id }: { id: string }) {
                   ? `Done: ${planDone} credits sent to your balance.`
                   : `${plan.parts.length - planLeft.length} of ${plan.parts.length} parts sent. Next at ${new Date(Math.min(...planLeft.map((x) => x.at))).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}; keep Revolve open around then, or it goes out next time you open it.`}
               </p>
+              {planLeft.length > 0 && plan.lastError && <p className="err" style={{ margin: "6px 0 0" }}>Waiting to retry: {plan.lastError}</p>}
             </div>
           )}
           {p.stage === "held" && (
