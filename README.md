@@ -64,7 +64,7 @@ Instead of one Zodl payment per buy, you can fund Revolve once (0.002 to 0.05 ZE
 - **A 0.001 ZEC grid.** Amounts are multiples of 0.001 ZEC, so there are many identical payments to hide among.
 - **A privacy coach.** Each position shows a linkability score with its reasons, and risky moves get a warning first: launch sniping, tiny holder counts, repeat buys, sending to another of your wallets or to a reused address, spending credits right after funding, cashing out right after buying or all at once.
 
-**Leaks we found and closed:**
+**Leaks we found and closed while building:**
 
 - **Transparent-address polling.** A full viewing key makes a light wallet ask the lightwalletd server about transparent addresses, which reveals them. The watcher strips the key down to Orchard only, so it never tracks transparent or Sapling receivers.
 - **Request logs at the relay.** The relay started as serverless functions next to the app on Vercel, where the host's request logs would see client IPs. It now runs on our own server with logging off.
@@ -129,4 +129,4 @@ Long-lived positions like staking, lending and perps are easier to watch over ti
 
 ---
 
-Built for **ZECATHON**, Cross-Chain track.
+Built for **ZECATHON 2026**, Cross-Chain track. All code was written during the hackathon.
