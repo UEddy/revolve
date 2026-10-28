@@ -5,6 +5,8 @@
 Live app: **https://revolveapp-phi.vercel.app** (order API: `https://revolveapp.duckdns.org`)
 
 > **Trying it live: buys are small on purpose.** The largest buy is limited by how much SOL the payout hot wallet holds, after what open orders have already reserved. Right now that allows about **0.005 ZEC per buy** (the minimum is 0.002 ZEC, in steps of 0.001). The app's amount screen always shows the current maximum, and so does [`/limits`](https://revolveapp.duckdns.org/limits) (`max_zec`). Larger amounts are refused before you pay, never after.
+>
+> **Withdrawals are small on purpose too.** Credits are withdrawn to shielded ZEC from a separate withdrawal hot wallet that holds only a little ZEC, and 0.0005 ZEC of it is always kept back for network fees. So a withdrawal is capped by what that wallet holds at the time (right now about **0.004 ZEC**, i.e. 4 credits). A withdrawal it can't cover is refused before anything is spent, and the credits stay in your balance; try a smaller amount.
 
 You pay from your shielded Zcash wallet (Zodl), and the asset lands in a brand-new wallet on the destination chain that holds that one position and nothing else. There are no accounts, no wallet connection, no gas to manage and no seed phrase: a passkey on your phone opens an encrypted vault that holds every position's key. Nothing on the Zcash side becomes public, and nothing on the destination side points back to you or to your other positions.
 
