@@ -16,6 +16,35 @@ async function prfSalt(): Promise<Uint8Array<ArrayBuffer>> {
   return saltCache;
 }
 
+/** How long a passkey prompt may stay open; creating one can take longer (choosing where to save it). */
+const PASSKEY_WAIT_MS = 60_000;
+const CREATE_WAIT_MS = 120_000;
+
+/** A passkey call that never answered: called off so the screen can offer a retry. */
+export class PasskeyTimeout extends Error {
+  constructor() {
+    super("Your passkey didn't answer. Try again.");
+  }
+}
+
+/**
+ * Runs a WebAuthn call that is called off after `ms`. Some phones never settle
+ * the call after the fingerprint, which left Unlock spinning; this turns that
+ * into an error the user can retry, and the abort frees the browser's one
+ * pending passkey request so the retry isn't refused.
+ */
+export async function withPasskeyTimeout<T>(call: (signal: AbortSignal) => Promise<T>, ms = PASSKEY_WAIT_MS): Promise<T> {
+  const ctl = new AbortController();
+  const timedOut = new Promise<never>((_, reject) => ctl.signal.addEventListener("abort", () => reject(new PasskeyTimeout()), { once: true }));
+  const timer = setTimeout(() => ctl.abort(), ms);
+  try {
+    // Raced, so a call that ignores the abort still can't hold the screen.
+    return await Promise.race([call(ctl.signal), timedOut]);
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 export function passkeysAvailable(): boolean {
   return typeof window !== "undefined" && window.isSecureContext && typeof PublicKeyCredential !== "undefined";
 }
@@ -32,8 +61,11 @@ function firstOutput(ext: PrfExt): Uint8Array<ArrayBuffer> | null {
 /** Creates the vault passkey. Returns its id, and the PRF output when the authenticator gives one at creation. */
 export async function createPasskey(): Promise<{ credId: string; prf: Uint8Array<ArrayBuffer> | null }> {
   if (!passkeysAvailable()) throw new PrfUnsupported("no passkey support in this browser");
-  const cred = (await navigator.credentials.create({
+  const salt = await prfSalt();
+  const cred = (await withPasskeyTimeout((signal) => navigator.credentials.create({
+    signal,
     publicKey: {
+      timeout: CREATE_WAIT_MS,
       rp: { name: "Revolve" },
       user: { id: random(16), name: "Revolve vault", displayName: "Revolve vault" },
       challenge: random(32),
@@ -43,9 +75,9 @@ export async function createPasskey(): Promise<{ credId: string; prf: Uint8Array
       ],
       authenticatorSelection: { residentKey: "required", userVerification: "required" },
       attestation: "none",
-      extensions: { prf: { eval: { first: await prfSalt() } } } as AuthenticationExtensionsClientInputs,
+      extensions: { prf: { eval: { first: salt } } } as AuthenticationExtensionsClientInputs,
     },
-  })) as PublicKeyCredential | null;
+  }), CREATE_WAIT_MS)) as PublicKeyCredential | null;
   if (!cred) throw new Error("Passkey creation was cancelled");
   const ext = cred.getClientExtensionResults() as PrfExt;
   if (ext.prf?.enabled === false || ext.prf === undefined) throw new PrfUnsupported("PRF not enabled on the new passkey");
@@ -55,14 +87,17 @@ export async function createPasskey(): Promise<{ credId: string; prf: Uint8Array
 /** Asks the passkey for the vault's PRF output. `credId` null lets the phone offer any Revolve passkey. */
 export async function evalPrf(credId: string | null): Promise<{ credId: string; prf: Uint8Array<ArrayBuffer> }> {
   if (!passkeysAvailable()) throw new PrfUnsupported("no passkey support in this browser");
-  const assertion = (await navigator.credentials.get({
+  const salt = await prfSalt();
+  const assertion = (await withPasskeyTimeout((signal) => navigator.credentials.get({
+    signal,
     publicKey: {
+      timeout: PASSKEY_WAIT_MS,
       challenge: random(32),
       userVerification: "required",
       allowCredentials: credId ? [{ type: "public-key", id: fromB64url(credId) as Uint8Array<ArrayBuffer> }] : [],
-      extensions: { prf: { eval: { first: await prfSalt() } } } as AuthenticationExtensionsClientInputs,
+      extensions: { prf: { eval: { first: salt } } } as AuthenticationExtensionsClientInputs,
     },
-  })) as PublicKeyCredential | null;
+  }))) as PublicKeyCredential | null;
   if (!assertion) throw new Error("Unlock was cancelled");
   const prf = firstOutput(assertion.getClientExtensionResults() as PrfExt);
   if (!prf) throw new PrfUnsupported("the passkey returned no PRF output");
@@ -84,13 +119,15 @@ export function assertionFlags(authenticatorData: ArrayBuffer | Uint8Array): { u
  */
 export async function confirmUser(credId: string): Promise<void> {
   if (!passkeysAvailable()) throw new PrfUnsupported("no passkey support in this browser");
-  const cred = (await navigator.credentials.get({
+  const cred = (await withPasskeyTimeout((signal) => navigator.credentials.get({
+    signal,
     publicKey: {
+      timeout: PASSKEY_WAIT_MS,
       challenge: random(32),
       userVerification: "required",
       allowCredentials: [{ type: "public-key", id: fromB64url(credId) as Uint8Array<ArrayBuffer> }],
     },
-  })) as PublicKeyCredential | null;
+  }))) as PublicKeyCredential | null;
   if (!cred) throw new Error("Confirmation was cancelled");
   if (b64url(new Uint8Array(cred.rawId)) !== credId) throw new Error("That was a different passkey");
   const { uv } = assertionFlags((cred.response as AuthenticatorAssertionResponse).authenticatorData);
