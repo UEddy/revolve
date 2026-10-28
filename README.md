@@ -12,7 +12,7 @@ You pay from your shielded Zcash wallet (Zodl), and the asset lands in a brand-n
 
 ## The problem, proven on mainnet
 
-Every route out of Zcash today deshields. To check, we swapped ZEC through NEAR Intents from Zodl. The resulting Zcash transaction is labelled **"Deshielding (Z-T)"** by the explorer: it has no transparent inputs and one public transparent output of **0.00251649 ZEC** to `t1dCCf1RHzVnkB6KE8d1bzAQypGNktu8zwh`.
+The common swap routes out of Zcash today deshield. To check, we swapped ZEC through NEAR Intents from Zodl. The resulting Zcash transaction is labelled **"Deshielding (Z-T)"** by the explorer: it has no transparent inputs and one public transparent output of **0.00251649 ZEC** to `t1dCCf1RHzVnkB6KE8d1bzAQypGNktu8zwh`.
 
 - Tx [`19d07f8f507039a1b922113c6cc28bfa8414478b198f96d30425d3541da6fe01`](https://mainnet.zcashexplorer.app/transactions/19d07f8f507039a1b922113c6cc28bfa8414478b198f96d30425d3541da6fe01), block 3,531,462
 
@@ -25,7 +25,7 @@ From one app on your phone you can:
 - **Buy any Solana token or tokenized stock with liquidity** (via Jupiter), paid in shielded ZEC. Live.
 - **Browse tokens on Base**: a hand-checked list, or any token by its contract address, with KyberSwap prices. Read only for now: buying is built end to end (ETH payout to a fresh Base wallet, the phone signs a KyberSwap buy) but switched off until its hot wallet is funded and tested.
 - **Browse** prediction markets (Polymarket) and NFT collections on Solana, Ethereum and Robinhood Chain. Live, read only: these cards say "Buying coming soon".
-- **Sell** a position to SOL (or ETH on Base) inside its own wallet, **send** it out, or **cash out privately**: the coin goes back to Revolve for blind-signed credits, at once or in random parts over hours, and you **withdraw** credits to your shielded Zcash address whenever you like. On Solana, Zodl's built-in Swap stays as a faster second route. Cashing out to credits and withdrawing them to shielded ZEC have both run on mainnet (see below).
+- **Sell** a position to SOL (or ETH on Base) inside its own wallet, **send** it out, or **cash out privately**: the coin goes back to Revolve for blind-signed credits, at once or in random parts over hours, and you **withdraw** credits to your shielded Zcash address whenever you like. On Solana, Zodl's built-in Swap stays as a faster second route, less private: its swap provider sees both ends. Cashing out to credits and withdrawing them to shielded ZEC have both run on mainnet (see below).
 
 No bridge UI, no chain selection, no wallet connection, no gas to buy separately: a little of each payout stays in its wallet for gas, and the app signs everything on the device.
 
@@ -90,7 +90,7 @@ Why a ZEC hot wallet is on the server now, and why it's acceptable:
 - **The server isn't told what you buy.** An order carries an amount and a fresh wallet, never a token; the buy happens on the phone.
 - **A fresh wallet per position.** Every buy lands in its own new wallet, funded by the shared payout wallet like every other Revolve user's. Its key is 32 bytes drawn at random on the phone (`crypto.getRandomValues`), never derived from the passkey, a seed or another position, so two phones, or two positions on one phone, can't end up with the same wallet (the odds are about 1 in 2^256).
 - **Keys sealed by your passkey.** The passkey doesn't make the wallets, it locks them: the vault is AES-256-GCM encrypted with a key derived (HKDF-SHA256) from the passkey's WebAuthn PRF output. That output comes from a secret each passkey creates for itself when it is made, so every passkey opens only its own vault, even though the PRF input is the same public constant for everyone. No password, no seed phrase, no copy on any server.
-- **No accounts, no IP logs.** Orders hold no IP, user agent or creation time. The relay and worker don't log requests, and the reverse proxy has access logs off.
+- **No accounts, no IP logs.** Orders hold no IP or user agent; the only time kept is when the quote expires. The relay and worker don't log requests, and the reverse proxy has access logs off.
 - **Mappings deleted after payout.** Once an order is paid, its row is deleted; only a hash of the note remains, so a re-emitted note isn't paid twice, and a hash of the wallet paid with the amount, which is public on chain anyway, for the cash-in rule. Nothing links that wallet back to the note or the order.
 - **Staggered balance checks.** The phone checks one wallet at a time, with gaps between them, so the RPC never sees all your wallets at once.
 - **A 0.001 ZEC grid.** Amounts are multiples of 0.001 ZEC, so there are many identical payments to hide among.
@@ -108,16 +108,15 @@ Stated plainly, so nobody has to dig for them:
 
 - **Custodial between deposit and payout.** From the moment your ZEC arrives until the SOL is paid out, Revolve holds the value. [Path to trustless](#path-to-trustless) is how that goes away.
 - **Credits are custodial until spent or withdrawn.** That's capped at 0.05 ZEC per funding or cash-in part. Losing your phone without a vault backup loses them.
-- **Withdrawals come from a hot wallet.** A ZEC spending key for that one wallet is on the server; its balance and a daily cap bound the loss. If it runs low, withdrawals wait (your credits stay yours) until it's topped up.
+- **Withdrawals come from a hot wallet.** A ZEC spending key for that one wallet is on the server; its balance and a daily cap bound the loss. If it runs low, a new withdrawal is refused before anything is spent (your credits stay yours) until it's topped up.
 - **Cash-in transfers are public.** Anyone can see a fresh wallet pay Revolve's hot wallet. What they can't see is where the credits went; timing and amounts are the remaining fingerprint, which is what the gradual mode and the coach are for.
 - **Gradual parts need the app.** A planned part goes out when Revolve is open on your phone at or after its time; the phone holds the keys, so nothing can send for it in the background.
 - **Payouts are public on the destination chain.** Anyone can see the hot wallet pay a fresh wallet and that wallet buy a token. What they can't see is who paid for it.
-- **The relay sees IPs and logs nothing.** It also sees, in transit, which token a fresh wallet swaps into. The order API sees IPs too, and logs nothing. You trust that we run them as published.
 - **Privacy grows with the crowd.** Blind credits, the shared hot wallets and the 0.001 ZEC grid hide you among everyone else doing the same thing. While only a handful of people use Revolve, there is little to hide among: amounts and timing narrow it down to you, for Revolve itself above all.
-- **IPs are the operator's to forget.** The order API and the relay both see your IP and log nothing. Blind signatures keep the database from linking a funding, a buy and a cash-out; they can't stop an operator who chose to log IPs from noticing the same phone made all three. For the strongest separation, use a VPN or a different network for different steps.
+- **IPs are the operator's to forget.** The order API and the relay both see your IP and log nothing; the relay also sees, in transit, which token a fresh wallet swaps into. You trust that we run them as published. Blind signatures keep the database from linking a funding, a buy and a cash-out; they can't stop an operator who chose to log IPs from noticing the same phone made all three. For the strongest separation, use a VPN or a different network for different steps.
 - **Behaviour can still link you.** Timing and amounts are fingerprints: a buy seconds after a funding, the same unusual amount twice, cashing out a whole position right after buying. The coach warns; it can't prevent.
-- **The mint key is a hot key.** If it leaked, an attacker could forge credits and claim payouts. The loss is bounded by what sits in the capped hot wallet.
-- **Refunds are manual.** A payment that doesn't match an open order exactly is held for review and refunded by hand: a wrong amount, a malformed or unknown memo, a payment after the quote expired, or a second payment to the same order.
+- **The mint key is a hot key.** If it leaked, an attacker could forge credits and claim payouts or withdrawals. The loss is bounded by what sits in the capped hot wallets and their daily caps.
+- **Refunds are manual.** A payment that doesn't match an open order exactly is held for review and refunded by hand: a wrong amount, a malformed or unknown memo, a payment after the quote expired, or a second payment to the same order. So is a cash-in held under the abuse protections (a stale quote, or a wallet Revolve didn't pay).
 
 ## Abuse protections
 
