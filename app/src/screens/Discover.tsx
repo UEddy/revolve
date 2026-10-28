@@ -1,5 +1,6 @@
-// The Discover tab: the category chips and carousel on top, then search,
-// trending, new launches and stocks, straight from Jupiter's token data.
+// The Discover tab: search on top, then one row of category chips, and the
+// chosen category below it: token lists (Jupiter), Base tokens, or a grid of
+// prediction markets or NFT collections.
 
 import { useEffect, useState } from "react";
 import { tokens, isStock, type JupToken } from "../lib/jupiter.ts";
@@ -7,14 +8,28 @@ import { compact, pct, price, ago } from "../lib/format.ts";
 import { href } from "../router.ts";
 import { TokenIcon } from "../components/bits.tsx";
 import { Search } from "../components/icons.tsx";
-import { DiscoverSection } from "../components/DiscoverSection.tsx";
+import { CardGrid } from "../components/DiscoverSection.tsx";
+import { BaseList } from "./Base.tsx";
 
-type Tab = "trending" | "new" | "stocks";
+type Tab = "trending" | "new" | "stocks" | "base" | "markets" | "nfts";
 const TABS: { key: Tab; label: string }[] = [
   { key: "trending", label: "Trending" },
   { key: "new", label: "New" },
   { key: "stocks", label: "Stocks" },
+  { key: "base", label: "Base" },
+  { key: "markets", label: "Predictions" },
+  { key: "nfts", label: "Collections" },
 ];
+const isTab = (s: string | null): s is Tab => TABS.some((t) => t.key === s);
+
+function readTab(): Tab {
+  try {
+    const t = sessionStorage.getItem("rv.tab");
+    return isTab(t) ? t : "trending";
+  } catch {
+    return "trending";
+  }
+}
 
 // Lists survive moving between screens, so going back does not refetch.
 const cache = new Map<string, { at: number; list: JupToken[] }>();
@@ -89,7 +104,7 @@ function Results({ list, error, showAge }: { list: JupToken[] | null; error: str
   );
 }
 
-function TabList({ tab }: { tab: Tab }) {
+function TabList({ tab }: { tab: "trending" | "new" | "stocks" }) {
   const loader = tab === "trending" ? tokens.trending : tab === "new" ? tokens.fresh : tokens.stocks;
   const s = useList(`tab:${tab}`, loader, tab === "new" ? 20_000 : 60_000);
   return <Results {...s} showAge={tab === "new"} />;
@@ -100,27 +115,29 @@ function SearchList({ query }: { query: string }) {
   return <Results {...s} />;
 }
 
+function TabBody({ tab }: { tab: Tab }) {
+  if (tab === "base") return <BaseList />;
+  if (tab === "markets" || tab === "nfts") return <CardGrid cat={tab} />;
+  return <TabList tab={tab} />;
+}
+
 export function Discover() {
-  const [tab, setTab] = useState<Tab>(() => (sessionStorage.getItem("rv.tab") as Tab) || "trending");
+  const [tab, setTab] = useState<Tab>(readTab);
   const [text, setText] = useState("");
   const [query, setQuery] = useState("");
   useEffect(() => {
     const t = setTimeout(() => setQuery(text.trim()), 350);
     return () => clearTimeout(t);
   }, [text]);
-  useEffect(() => sessionStorage.setItem("rv.tab", tab), [tab]);
+  useEffect(() => {
+    try {
+      sessionStorage.setItem("rv.tab", tab);
+    } catch {}
+  }, [tab]);
   return (
     <div className="screen">
       <h1 style={{ marginTop: 6 }}>Discover</h1>
-      <DiscoverSection />
-      <a className="card flat row" href={href.base} style={{ margin: "14px 0", color: "inherit", textDecoration: "none" }}>
-        <div className="grow">
-          <b>Buy on Base</b>
-          <div className="faint small">Tokens on Coinbase's chain, each in a fresh Base wallet</div>
-        </div>
-        <span aria-hidden>›</span>
-      </a>
-      <div className="search" style={{ position: "sticky" }}>
+      <div className="search">
         <Search />
         <input
           className="input"
@@ -140,14 +157,14 @@ export function Discover() {
         </div>
       ) : (
         <>
-          <div className="seg" role="group">
+          <div className="dsc-chips" role="tablist" aria-label="Category">
             {TABS.map((t) => (
-              <button key={t.key} aria-pressed={tab === t.key} onClick={() => setTab(t.key)}>
+              <button key={t.key} role="tab" aria-selected={tab === t.key} className="dsc-chip" onClick={() => setTab(t.key)}>
                 {t.label}
               </button>
             ))}
           </div>
-          <TabList key={tab} tab={tab} />
+          <TabBody key={tab} tab={tab} />
         </>
       )}
     </div>

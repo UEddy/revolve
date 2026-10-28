@@ -181,29 +181,20 @@ h3 { font-size: 16px; margin: 0; }
 .stat { background: var(--sunk); border-radius: 16px; padding: 12px; }
 .stat b { display: block; font: 700 17px var(--display); margin-top: 2px; }
 
-/* ---------- discover carousel (Discover tab) ---------- */
-/* Compact on purpose: about a third of a phone screen, so search and the lists stay visible below. */
-.dsc { height: clamp(250px, 34dvh, 300px); display: flex; flex-direction: column; margin: 12px 0 4px; }
+/* ---------- Discover: category chips, card grid ---------- */
 .dsc-chips {
-  flex: none; display: flex; gap: 8px; overflow-x: auto; scrollbar-width: none;
-  margin: 0 -18px; padding: 2px 18px 10px;
+  display: flex; gap: 8px; overflow-x: auto; scrollbar-width: none;
+  margin: 14px -18px 12px; padding: 2px 18px;
 }
 .dsc-chips::-webkit-scrollbar { display: none; }
 .dsc-chip {
-  flex: none; white-space: nowrap; cursor: pointer; padding: 7px 13px; border-radius: 999px;
-  border: 1px solid var(--line); background: var(--surface); color: var(--muted); font: 600 13px var(--body);
+  flex: none; white-space: nowrap; cursor: pointer; padding: 8px 14px; border-radius: 999px;
+  border: 1px solid var(--line); background: var(--surface); color: var(--muted); font: 600 14px var(--body);
 }
 .dsc-chip[aria-selected="true"] { background: var(--accent); border-color: var(--accent); color: var(--on-accent); }
-.dsc-body { position: relative; flex: 1; min-height: 0; }
-/* Three cards and a peek of the fourth: each column is 1/3.3 of the visible width. */
-.dsc-track {
-  --gap: 10px;
-  height: 100%; display: grid; grid-auto-flow: column; grid-auto-columns: calc((100% - 2 * var(--gap)) / 3.3); column-gap: var(--gap);
-  overflow-x: auto; overscroll-behavior-x: contain; scroll-snap-type: x mandatory; scrollbar-width: none;
-  margin: 0 -18px; padding: 0 18px; scroll-padding-inline: 18px;
-}
-.dsc-track::-webkit-scrollbar { display: none; }
-.dsc-slot { scroll-snap-align: start; min-width: 0; height: 100%; }
+/* Two columns on phones, three where there is room. */
+.dsc-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(148px, 1fr)); gap: 10px; }
+.dsc-grid > * { min-width: 0; }
 .dsc-card {
   height: 100%; display: flex; flex-direction: column; gap: 6px; padding: 12px; overflow: hidden;
   border-radius: 18px; background: var(--surface); border: 1px solid var(--line); color: var(--ink); text-decoration: none;
@@ -212,7 +203,8 @@ h3 { font-size: 16px; margin: 0; }
 .dsc-top { display: flex; align-items: flex-start; justify-content: space-between; gap: 6px; min-width: 0; }
 /* Which chain an NFT collection is on: present, never louder than the name. */
 .dsc-chain { font-size: 10px; line-height: 1.2; color: var(--faint); text-align: right; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
-.dsc-card.skeleton { height: 100%; border: 0; }
+.dsc-card { min-height: 150px; }
+.dsc-card.skeleton { border: 0; }
 .dsc-name { font-weight: 600; font-size: 14px; line-height: 1.25; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .dsc-two { white-space: normal; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
 /* Market and collection names get a third line: the cards have the room. */
@@ -222,27 +214,7 @@ h3 { font-size: 16px; margin: 0; }
 .dsc-sub { min-height: 1.2em; font-size: 12px; color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .dsc-sub.up { color: var(--ink); }
 .dsc-sub.down { color: var(--danger); }
-.dsc-dots { flex: none; height: 24px; display: flex; justify-content: center; align-items: center; gap: 2px; }
-.dsc-dot { width: 16px; height: 16px; padding: 0; border: 0; background: none; cursor: pointer; display: grid; place-items: center; }
-.dsc-dot::after { content: ""; width: 7px; height: 7px; border-radius: 999px; background: var(--line); transition: width 200ms var(--ease), background 200ms; }
-.dsc-dot[aria-current="true"]::after { width: 16px; background: var(--accent-mark); }
-.dsc-empty { height: 100%; display: grid; place-content: center; justify-items: center; gap: 8px; text-align: center; }
-/* First visit: the cards nudge left and settle, to show the row scrolls. */
-.dsc-track.hint .dsc-slot { animation: dsc-nudge 1.4s var(--ease) 300ms both; }
-@keyframes dsc-nudge { 0%, 100% { transform: translateX(0); } 40% { transform: translateX(-36px); } }
-.dsc-arrow { display: none; }
-@media (hover: hover) and (pointer: fine) and (min-width: 420px) {
-  .dsc-arrow {
-    display: grid; place-items: center; position: absolute; top: 50%; transform: translateY(-50%); z-index: 2;
-    width: 30px; height: 30px; border-radius: 999px; border: 1px solid var(--line); background: var(--surface);
-    color: var(--ink); cursor: pointer; box-shadow: var(--shadow);
-  }
-  .dsc-arrow svg { width: 16px; height: 16px; }
-  .dsc-arrow.prev { left: -6px; }
-  .dsc-arrow.next { right: -6px; }
-  .dsc-arrow.next svg { transform: rotate(180deg); }
-  .dsc-arrow:disabled { opacity: 0; pointer-events: none; }
-}
+.dsc-empty { padding: 40px 0; display: grid; place-content: center; justify-items: center; gap: 8px; text-align: center; }
 
 /* ---------- risk meter ---------- */
 .meter { display: inline-flex; gap: 3px; vertical-align: middle; color: var(--accent-mark); }
