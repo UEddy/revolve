@@ -18,6 +18,8 @@ export interface Config {
   spreadBps: number;
   quoteTtlSecs: number;
   maxOpenOrders: number;
+  /** How far the market may move against Revolve between a quote and its payout or cash-in before the quote stops binding. */
+  maxPriceMoveBps: number;
   /** PKCS#8 PEM of the credits mint key, outside any work tree and code folder (keypath.ts); empty or unloadable disables /mint. */
   mintKeyPath: string;
   mintKeyId: string;
@@ -57,7 +59,8 @@ export function loadConfig(): Config {
     dailyPayoutCapLamports: BigInt(opt("DAILY_PAYOUT_CAP_LAMPORTS", "1000000000")),
     lamportsPerZec: fixedRate === "" ? null : BigInt(fixedRate),
     spreadBps: Number(opt("SPREAD_BPS", "150")),
-    quoteTtlSecs: Number(opt("QUOTE_TTL_SECS", "900")),
+    quoteTtlSecs: Number(opt("QUOTE_TTL_SECS", "600")),
+    maxPriceMoveBps: Number(opt("MAX_PRICE_MOVE_BPS", "300")),
     maxOpenOrders: Number(opt("MAX_OPEN_ORDERS", "20")),
     mintKeyPath: opt("MINT_KEY_PATH", ""),
     mintKeyId: opt("MINT_KEY_ID", "k1"),

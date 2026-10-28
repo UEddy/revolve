@@ -31,7 +31,7 @@ function conn(tx: null | { err?: unknown; pre: number; post: number; blockTime: 
 test("Solana cash-in check: the hot wallet's own balance rise, in the quote's window, on a successful transaction", async () => {
   const v = (c: Connection) => solanaRail(c, hot.toBase58(), () => 1n).verify(sig, 264_000n, 1_000, 2_000, FUND);
   assert.equal(await v(conn(null)), "pending");
-  assert.equal(await v(conn({ pre: 5, post: 264_005, blockTime: 1_500 })), "ok");
+  assert.deepEqual(await v(conn({ pre: 5, post: 264_005, blockTime: 1_500 })), { ok: true, at: 1_500 }, "with when it landed");
   assert.equal(await v(conn({ pre: 5, post: 264_004, blockTime: 1_500 })), "bad", "one lamport short");
   assert.equal(await v(conn({ pre: 5, post: 264_005, blockTime: 999 })), "bad", "before the quote");
   assert.equal(await v(conn({ pre: 5, post: 264_005, blockTime: 2_001 })), "bad", "after the grace window");

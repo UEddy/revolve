@@ -16,6 +16,16 @@ export const MIN_ZAT = 200_000n;
 export const STEP_ZAT = 100_000n;
 
 export const REQUIRED_CONFS = 3;
+/**
+ * Unpaid quotes reserve nothing, so they are not what the open-order cap limits.
+ * This bound only keeps the table small: it is above what the global write rate
+ * (3 a second) can create in one 10-minute quote window, so it never binds alone.
+ */
+export const MAX_UNPAID_QUOTES = 2000;
+/** Expired, never-paid quotes are deleted after this long (a payment that still arrives goes to review). */
+export const PRUNE_UNPAID_AFTER_SECS = 24 * 3600;
+/** Order statuses that hold inventory: paid (a note was seen, or credits were spent) and not yet paid out. */
+const HOLDING = "('seen','confirmed','paying')";
 /** Token orders are already backed, so they pay after a random delay instead of confirmations. */
 const TOKEN_PAY_DELAY_SECS: [number, number] = [60, 300];
 const PAID_CACHE_MS = 15 * 60 * 1000;
@@ -79,6 +89,8 @@ export interface DuePayout {
   burner: string;
   /** Lamports on Solana, wei on EVM chains. */
   lamports: bigint;
+  /** The ZEC amount it was quoted for, so the payout can be checked against the price now. */
+  amountZat: bigint;
 }
 
 export interface ReviewNote {
@@ -200,17 +212,26 @@ export class OrderBook {
     this.funds = new FundBook(db, now);
   }
 
+  /** Paid orders not yet paid out: what MAX_OPEN_ORDERS caps. An unpaid quote costs nothing to make, so it never counts. */
   openCount(): number {
-    const r = this.db
-      .prepare("SELECT COUNT(*) AS n FROM orders WHERE status IN ('awaiting_payment','seen','confirmed','paying')")
-      .get() as { n: number };
+    const r = this.db.prepare(`SELECT COUNT(*) AS n FROM orders WHERE status IN ${HOLDING}`).get() as { n: number };
     return r.n;
   }
 
-  /** Payout units (lamports, or wei on EVM chains) promised on one chain to orders that may still be paid out. */
+  /** Quotes still waiting for a payment. */
+  unpaidCount(): number {
+    const r = this.db.prepare("SELECT COUNT(*) AS n FROM orders WHERE status = 'awaiting_payment'").get() as { n: number };
+    return r.n;
+  }
+
+  /**
+   * Payout units (lamports, or wei on EVM chains) promised on one chain to paid
+   * orders that may still be paid out. A quote reserves nothing until its payment
+   * is seen, so unpaid quotes can't be used to lock up the hot wallet.
+   */
   committedLamports(chain: Chain = "solana"): bigint {
     const rows = this.db
-      .prepare(`SELECT payout_lamports FROM orders WHERE status IN ('awaiting_payment','seen','confirmed','paying') AND ${CHAIN_IS}`)
+      .prepare(`SELECT payout_lamports FROM orders WHERE status IN ${HOLDING} AND ${CHAIN_IS}`)
       .all(chain) as { payout_lamports: string }[];
     return rows.reduce((sum, r) => sum + BigInt(r.payout_lamports), 0n);
   }
@@ -256,17 +277,17 @@ export class OrderBook {
   }
 
   expire(): void {
-    this.db
-      .prepare("UPDATE orders SET status = 'expired' WHERE status = 'awaiting_payment' AND expires_at <= ?")
-      .run(Math.floor(this.now() / 1000));
+    const now = Math.floor(this.now() / 1000);
+    this.db.prepare("UPDATE orders SET status = 'expired' WHERE status = 'awaiting_payment' AND expires_at <= ?").run(now);
+    this.db.prepare("DELETE FROM orders WHERE status = 'expired' AND note_key IS NULL AND expires_at <= ?").run(now - PRUNE_UNPAID_AFTER_SECS);
     this.funds.expire();
     for (const [id, p] of this.paid) if (p.until <= this.now()) this.paid.delete(id);
   }
 
   /**
    * Cancels an unpaid order: allowed only while no note has been seen for it
-   * (awaiting_payment, or expired unpaid). The row is deleted, which releases the
-   * inventory it reserved, and only a hash of the id is kept so a payment that
+   * (awaiting_payment, or expired unpaid). The row is deleted (an unpaid quote
+   * holds no inventory), and only a hash of the id is kept so a payment that
    * still arrives goes to review. The check and delete are one statement, so a
    * note applied concurrently either lands first (payment_seen) or finds no order.
    */
@@ -331,7 +352,12 @@ export class OrderBook {
         `SELECT * FROM orders WHERE status = 'confirmed' AND (confirmations >= pay_at_confs OR pay_after <= ?) AND ${CHAIN_IS}`,
       )
       .all(Math.floor(this.now() / 1000), chain) as unknown as OrderRow[];
-    return rows.map((r) => ({ orderId: r.order_id, burner: r.burner!, lamports: BigInt(r.payout_lamports) }));
+    return rows.map((r) => ({ orderId: r.order_id, burner: r.burner!, lamports: BigInt(r.payout_lamports), amountZat: BigInt(r.bucket_zat) }));
+  }
+
+  /** A due payout re-priced before it is claimed (the market moved against its quote). */
+  reprice(orderId: string, payout: bigint): void {
+    this.db.prepare("UPDATE orders SET payout_lamports = ? WHERE order_id = ? AND status = 'confirmed'").run(payout.toString(), orderId);
   }
 
   /**

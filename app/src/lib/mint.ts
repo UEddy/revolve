@@ -106,6 +106,7 @@ const CASHIN_ERRORS: Record<string, string> = {
   bad_tx: "Revolve couldn't match the transfer to this cash-in. It will be sorted out by hand.",
   tx_used: "That transfer was already used for another cash-in.",
   not_awaiting: "This cash-in is no longer open.",
+  price_moved: "The price moved more than 3% between this part's quote and its transfer, so it's held for review and will be sorted out by hand. Nothing is lost.",
 };
 
 export type WithdrawAnswer = { outcome: "queued"; id: string } | { outcome: "spent" | "return" | "keep"; message: string };

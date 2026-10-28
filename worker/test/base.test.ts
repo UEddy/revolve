@@ -69,6 +69,9 @@ test("Base orders: per-chain limits, payout_wei, chain on the order, its own inv
       payout_signature: null,
       chain: "base",
     });
+    assert.equal(book.committedLamports("base"), 0n, "an unpaid quote reserves nothing");
+    // Paid, it holds its payout.
+    book.onNote(note(`rv1|${o.order_id}|base|${recipient}`, 300_000, 0, "0a".repeat(32)));
     assert.equal(book.committedLamports("base"), 3_000_000_000_000_000n);
     assert.equal(book.committedLamports("solana"), 0n, "Solana inventory untouched");
     assert.equal((await post(base, { amount_zec: "0.002", chain: "base" })).status, 409, "only 0.0015 ETH left on Base");
@@ -95,7 +98,7 @@ test("Base memos: the 4-field memo pays on Base; a Solana memo or a bad address 
   const book = new OrderBook(openDb(":memory:"));
   const ok = book.create(300_000n, 3_000_000_000_000_000n, 900, "base");
   book.onNote(note(`rv1|${ok.order_id}|base|${recipient}`, 300_000, 20, "01".repeat(32)));
-  assert.deepEqual(book.due("base"), [{ orderId: ok.order_id, burner: recipient, lamports: 3_000_000_000_000_000n }]);
+  assert.deepEqual(book.due("base"), [{ orderId: ok.order_id, burner: recipient, lamports: 3_000_000_000_000_000n, amountZat: 300_000n }]);
   assert.deepEqual(book.due("solana"), []);
 
   const solMemo = book.create(300_000n, 1n, 900, "base");
@@ -269,4 +272,24 @@ test("Base payout waits for the daily cap and for balance plus gas plus reserve"
   assert.equal(book.inFlightEvm("base").length, 0, "nothing claimed while waiting");
   await runEvmPayouts(book, "base", chain, limits);
   assert.equal(book.get(id)!.status, "paid_out");
+});
+
+test("Base payout is checked against the price now: paid as quoted within 3%, re-priced beyond it, held without a price", async () => {
+  const book = new OrderBook(openDb(":memory:"));
+  const chain = new FakeBase();
+  const a = dueBaseOrder(book, 1_000_000n, "0a".repeat(32));
+  const now = { wei: 980_000n as bigint | null };
+  const guarded = { ...limits, quote: () => now.wei, maxMoveBps: 300 };
+  await runEvmPayouts(book, "base", chain, guarded);
+  assert.equal([...chain.txs.values()].at(-1)!.wei, 1_000_000n, "2% against Revolve: the quote stands");
+
+  const b = dueBaseOrder(book, 1_000_000n, "0b".repeat(32));
+  now.wei = null;
+  await runEvmPayouts(book, "base", chain, guarded);
+  assert.equal(book.get(b)!.status, "confirmed", "no fresh price: it waits");
+  now.wei = 950_000n;
+  await runEvmPayouts(book, "base", chain, guarded);
+  assert.equal([...chain.txs.values()].at(-1)!.wei, 950_000n, "5% against Revolve: paid at today's rate");
+  assert.equal(book.get(a)!.status, "paid_out");
+  assert.equal(book.get(b)!.status, "paid_out");
 });
