@@ -64,7 +64,7 @@ Instead of one Zodl payment per buy, you can fund Revolve once (0.002 to 0.05 ZE
 - **A 0.001 ZEC grid.** Amounts are multiples of 0.001 ZEC, so there are many identical payments to hide among.
 - **A privacy coach.** Each position shows a linkability score with its reasons, and risky moves get a warning first: launch sniping, tiny holder counts, repeat buys, sending to another of your wallets or to a reused address, spending credits right after funding, cashing out right after buying or all at once.
 
-**Leaks we found and closed while building:**
+**Leaks we found and closed:**
 
 - **Transparent-address polling.** A full viewing key makes a light wallet ask the lightwalletd server about transparent addresses, which reveals them. The watcher strips the key down to Orchard only, so it never tracks transparent or Sapling receivers.
 - **Request logs at the relay.** The relay started as serverless functions next to the app on Vercel, where the host's request logs would see client IPs. It now runs on our own server with logging off.
@@ -94,9 +94,9 @@ Stated plainly, so nobody has to dig for them:
 
 Both Zcash transactions show as fully shielded on the explorer (Orchard actions, no transparent inputs or outputs). The worker's database holds no record of the paid order any more, only a hash of the deposit note, which matches this deposit.
 
-## How Revolve differs from bridges like ZCross
+## How Revolve differs from NEAR Intents
 
-Bridges such as [ZCross](https://github.com/Blackwrld04/ZCross) route a swap of shielded ZEC through NEAR solvers into another chain's asset. Revolve is a consumer app: you pick the token or stock itself, and it arrives in a wallet of its own. Every position gets its own fresh, unlinked wallet. And with credits, even the order server can't link your buys to your deposit or to each other.
+[NEAR Intents](https://docs.near-intents.org) swaps ZEC into another chain's asset through a network of solvers, and the result goes to an address you supply. As shown above, the ZEC leaves Zcash through a deshielding transaction: the amount and time become public and can be matched to the swap on the other side. Revolve keeps the payment fully shielded, to an Orchard-only address with an encrypted memo, so nothing about it is public on Zcash. It is also a consumer app rather than a swap route: you pick the token or stock itself, and it arrives in a fresh wallet that holds that one position and is unlinked to your others. And with credits, even the order server can't link your buys to your deposit or to each other.
 
 ## Architecture and repo map
 
@@ -129,4 +129,4 @@ Long-lived positions like staking, lending and perps are easier to watch over ti
 
 ---
 
-Built for **ZECATHON 2026**, Cross-Chain track. All code was written during the hackathon (first commit 2026-10-26).
+Built for **ZECATHON**, Cross-Chain track.
