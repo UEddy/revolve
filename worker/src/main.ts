@@ -6,6 +6,12 @@ import { BasePayer, runEvmPayouts } from "./evm.ts";
 import { Payer, freeInventory, freeOnChain, runPayouts } from "./payout.ts";
 import { Pricing } from "./pricing.ts";
 import { createApi } from "./server.ts";
+import { readFileSync } from "node:fs";
+import { solanaRail } from "./cashin.ts";
+import { secretPathProblem } from "./keypath.ts";
+import { CREDIT_ZAT } from "./mint.ts";
+import { WithdrawBook, runWithdrawals } from "./withdrawals.ts";
+import { ProcessZecPayer } from "./zecpayer.ts";
 import { runWatcher } from "./watcher.ts";
 
 const TICK_MS = 15_000;
@@ -30,10 +36,37 @@ if (cfg.base.keyPath) {
   }
 }
 
+// Withdrawals (v1.5) are optional too: without a ZEC hot wallet they answer 503.
+let zecPayer: ProcessZecPayer | null = null;
+if (cfg.zecPayerEnvFile) {
+  try {
+    const seedPath = /^REVOLVE_PAYER_SEED_PATH=(.*)$/m.exec(readFileSync(cfg.zecPayerEnvFile, "utf8"))?.[1]?.trim();
+    if (!seedPath) throw new Error(`${cfg.zecPayerEnvFile} sets no REVOLVE_PAYER_SEED_PATH`);
+    const problem = secretPathProblem(seedPath);
+    if (problem) throw new Error(`refusing the withdrawal hot wallet seed: ${problem}`);
+    zecPayer = new ProcessZecPayer(cfg.watcherBin, cfg.zecPayerEnvFile);
+  } catch (e) {
+    console.error(`!!! WITHDRAWALS UNAVAILABLE: ${(e as Error).message}`);
+  }
+}
+const withdrawals = new WithdrawBook(book.db);
+const BALANCE_EVERY_MS = 5 * 60_000;
+let zecBalanceAt = 0;
+let payingZec = false;
+
 let paying = false;
 let payingBase = false;
 async function tick() {
   book.expire();
+  if (zecPayer && !payingZec) {
+    payingZec = true;
+    const zp = zecPayer;
+    const refresh = Date.now() - zecBalanceAt > BALANCE_EVERY_MS ? zp.refreshBalance().then(() => void (zecBalanceAt = Date.now())) : Promise.resolve();
+    void refresh
+      .then(() => runWithdrawals(withdrawals, zp, cfg.withdrawDailyCapZat))
+      .catch((e: unknown) => console.error(`withdrawal tick failed: ${(e as Error).message}`))
+      .finally(() => (payingZec = false));
+  }
   if (basePayer && !payingBase) {
     payingBase = true;
     void basePayer
@@ -71,6 +104,11 @@ createApi({
   usdPerZec: () => pricing.indicativeUsdPerZec(),
   mint,
   chains: basePayer ? ["solana", "base"] : ["solana"],
+  cashin: {
+    solana: solanaRail(payer.conn, payer.address, () => pricing.cashinPerCredit("solana", CREDIT_ZAT)),
+    ...(basePayer ? { base: basePayer.cashinRail(() => pricing.cashinPerCredit("base", CREDIT_ZAT)) } : {}),
+  },
+  withdraw: zecPayer ? { book: withdrawals, payer: zecPayer } : undefined,
   freeInventory: (chain) => {
     if (chain === "solana") {
       const balance = payer.cachedBalance();

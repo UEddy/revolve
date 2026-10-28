@@ -136,7 +136,15 @@ export function FundingScreen({ id }: { id: string }) {
   return (
     <div className="screen">
       <TopBar title="Add funds" right={f.demo ? <span className="badge caution">Demo</span> : undefined} />
-      {f.status === "awaiting_payment" && (
+      {f.cashin && f.status === "awaiting_payment" && (
+        <div className="card flat">
+          <h3>Cashing out to credits</h3>
+          <p className="muted">
+            {f.cashin.tx ? "Sent from your position. Revolve is checking the transfer on chain; your credits follow." : "Sending from your position…"}
+          </p>
+        </div>
+      )}
+      {!f.cashin && f.status === "awaiting_payment" && (
         <PayCard
           depositUa={f.depositUa}
           amountZec={f.amountZec}
@@ -145,7 +153,7 @@ export function FundingScreen({ id }: { id: string }) {
           memoNote="The message only names this funding; it carries nothing about you and is encrypted on chain."
         />
       )}
-      {f.status === "awaiting_payment" && (
+      {!f.cashin && f.status === "awaiting_payment" && (
         <>
           <div className="spacer" />
           <CancelPayment what="funding" run={() => cancelFunding(f.fundId).then(() => setCancelled(true))} />

@@ -1,4 +1,4 @@
-# Revolve contract v1.3 addendum: shielded credits (fund once, buy with a passkey tap)
+# Revolve contract v1.3 to v1.5 addendum: shielded credits (fund once, buy with a passkey tap, cash out and withdraw)
 
 Adds to v1.2. Everything in v1.2 stays (per-buy Pay with Zodl remains as the fallback path).
 
@@ -69,6 +69,51 @@ Request:
 ## Spending on Base (v1.4)
 
 The spend form takes an optional `"chain"` (see API_CONTRACT.md v1.4). With `"chain": "base"`, `burner` is the fresh wallet's EIP-55 checksummed address and the 201 carries `payout_wei` instead of `payout_lamports`. `invalid_chain`, `invalid_burner` and `chain_unavailable` leave every token unspent. The spend key covers the chain too, so an exact retry still finds its order.
+
+## v1.5: cash out to credits, and withdraw to shielded ZEC
+
+Cashing a position out through Zodl's Swap leaves two trails: the swap provider (and Zodl) learn which fresh wallet paid and which Zcash address was paid, and the transfer's amount and time are public on the position's chain. v1.5 adds a route with neither: the position's SOL (or ETH on Base) comes back to Revolve for blind-signed credits, and credits can later be withdrawn as shielded ZEC. Blind signing means Revolve can't tell which cash-in paid for which withdrawal, and no outside party is involved.
+
+### GET /limits (cash-in rates)
+
+When the mint and a chain's hot wallet are both available, `/limits` carries `cashin`: what one credit costs in that chain's coin, spread included (indicative; the quote below is binding).
+```json
+"cashin": { "solana": { "per_credit": "88000" }, "base": { "per_credit": "330000000000" } }
+```
+`per_credit` is lamports on Solana, wei on Base. A chain missing here can't cash in right now.
+
+### POST /cashins (quote)
+
+Request: `{ "chain": "solana", "credits": 7 }` (1 to 50 credits, the funding cap). Response 201:
+```json
+{ "fund_id": "rf_...", "chain": "solana", "credits": 7, "pay_to": "<hot wallet address>", "pay_lamports": "616000", "expires_at": "..." }
+```
+(`pay_wei` on Base.) The quote lasts `QUOTE_TTL_SECS`. A cash-in is a funding (`fund_id`): `GET /mint/orders/:fund_id`, `DELETE` while unpaid, and `POST /mint/orders/:fund_id/sign` once `funded` all work as for a ZEC funding. Errors: 400 `invalid_chain`, 400 `invalid_amount`, 503 `cashin_unavailable` (no price, no hot wallet or no mint), 503 `busy`.
+
+### POST /cashins/:fund_id/sent
+
+The app sends at least `pay_lamports` (or `pay_wei`) from the position's wallet to `pay_to` in one transfer that **names the cash-in**: a Memo-program instruction whose data is the `fund_id` on Solana, or the `fund_id` (UTF-8) as the transaction's input data on Base. Then it reports it: `{ "tx": "<Solana signature | Base tx hash>" }`. The worker looks the transaction up itself and checks: it succeeded and is confirmed, it names this `fund_id`, it raised `pay_to`'s balance by at least the quoted amount, it was mined after the quote was made and before it expired (10 minutes of grace), and it was never used for another cash-in. Transfers to the hot wallet are public, so without the name anyone could report someone else's transfer against a quote of their own.
+- 200 `{ "status": "funded" }`: the credits can be signed now.
+- 202 `{ "status": "pending" }`: not found or not confirmed yet. Report again shortly.
+- 400 `bad_tx` (failed, wrong recipient, too little, or outside the quote's window), 409 `tx_used`, 404 `not_found`, 409 `not_awaiting` (already funded, expired or cancelled).
+
+Underpaid or late transfers are never minted automatically; they are refunded by hand like any other review item.
+
+### POST /withdrawals
+
+Request: `{ "tokens": [{ "msg": "...", "sig": "..." }, ...], "address": "u1..." }`. The address must be a mainnet unified address with an Orchard receiver; transparent and Sapling-only addresses are refused, so a withdrawal is always fully shielded. The amount is exactly `tokens × 0.001` ZEC; Revolve pays the network fee. Response 201: `{ "withdrawal_id": "rw_...", "amount_zec": "0.007", "status": "queued" }`.
+- Same checks as a spend: every signature verified first; spent check, spend record and withdrawal row in one transaction; an exact retry (same tokens and address) returns the same withdrawal.
+- 400 `invalid_tokens`, 400 `invalid_address`, 409 `token_spent`, 503 `withdraw_unavailable` (no ZEC hot wallet, or it can't cover this right now). Nothing is spent on any error.
+
+### GET /withdrawals/:withdrawal_id
+
+`{ "status": "queued" }`, `{ "status": "sending" }`, or `{ "status": "sent", "txid": "..." }`. After sending, the row (and with it the address) is deleted; the txid is served from memory for 24 hours, then 404.
+
+### Rules for the worker (v1.5)
+
+- Withdrawals pay after a random 20 to 120 minutes, one at a time, so a withdrawal can't be paired with a cash-in or a funding by timing.
+- They are paid from a separate ZEC hot wallet with its own seed, never from the deposit address: the deposit address's spending key stays off the server. The hot wallet holds what an operator moves into it, and a daily cap (`WITHDRAW_DAILY_CAP_ZAT`) bounds what it pays.
+- The sender stores each signed transaction under its withdrawal id before broadcasting. A retry re-broadcasts those same bytes, which can never pay twice (the notes it spends can only be spent once).
 
 ## Privacy and trust (README)
 

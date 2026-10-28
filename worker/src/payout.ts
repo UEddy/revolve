@@ -15,6 +15,11 @@ export class Payer {
     this.key = Keypair.fromSecretKey(secret);
   }
 
+  /** The hot wallet's address: where Solana cash-ins (v1.5) are paid. */
+  get address(): string {
+    return this.key.publicKey.toBase58();
+  }
+
   /** Last known balance; refreshed by `refreshBalance`, never per request. */
   cachedBalance(): bigint | null {
     return this.balance;

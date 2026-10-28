@@ -57,8 +57,11 @@ export type Position = {
   swap?: { sig?: string; inLamports?: string; outAmount?: string; at?: number; error?: string; attempts: number };
   /** `lamports` is wei on Base. */
   balance?: { lamports: string; tokenRaw: string; at: number };
-  /** `cashout`: SOL sent to a deposit address from Zodl's Swap, to come back as shielded ZEC. */
-  sends: { to: string; at: number; sig: string; what: "asset" | "cash"; cashout?: true }[];
+  /**
+   * `cashout`: SOL sent to a deposit address from Zodl's Swap, to come back as shielded ZEC.
+   * `cashin`: sent to Revolve's hot wallet for blind-signed credits (v1.5).
+   */
+  sends: { to: string; at: number; sig: string; what: "asset" | "cash"; cashout?: true; cashin?: true }[];
   keyRevealed?: boolean;
   /** A half-filled "Cash out to Zcash" form, kept in the vault so switching to Zodl (and a lock meanwhile) loses nothing. */
   cashoutDraft?: { to: string; amount: string };
@@ -66,6 +69,12 @@ export type Position = {
   demo?: boolean;
   /** "credits": paid from the credit balance (CREDITS_CONTRACT.md); otherwise a per-buy Zodl payment. */
   paidWith?: "credits";
+  /**
+   * Cash out to credits (CREDITS_CONTRACT.md v1.5): the wallet's SOL or ETH goes
+   * back to Revolve for blind-signed credits, in one or more parts. Each part
+   * becomes a cash-in funding (`fundId`) when its time comes.
+   */
+  cashoutPlan?: { mode: "now" | "gradual"; createdAt: number; parts: { credits: number; at: number; fundId?: string; skipped?: true }[] };
 };
 
 // ---- credits (CREDITS_CONTRACT.md v1.3) ----
@@ -93,6 +102,32 @@ export type Funding = {
   mintedAt?: number;
   error?: string;
   demo?: boolean;
+  /** v1.5 cash-in: paid by a transfer from a position's wallet on this chain instead of a ZEC note. */
+  cashin?: {
+    chain: Chain;
+    positionId: string;
+    payTo: string;
+    /** Lamports or wei, as quoted. */
+    payAmount: string;
+    /** Set before the transfer is signed: if a reload finds it without `tx`, the transfer is never sent again. */
+    sendStarted?: true;
+    tx?: string;
+  };
+};
+
+/** A withdrawal of credits to shielded ZEC (v1.5). Its tokens stay here until the server has answered. */
+export type Withdrawal = {
+  key: string;
+  id?: string;
+  amountZec: string;
+  address: string;
+  createdAt: number;
+  status: "sending" | "queued" | "sent" | "failed";
+  tokens?: CreditToken[];
+  /** True once a send failed without an answer: the server may already have it. */
+  uncertain?: boolean;
+  txid?: string;
+  error?: string;
 };
 
 /** A spend in flight: its tokens are out of the balance until the server answers. */
@@ -113,6 +148,8 @@ export type Credits = {
   tokens: CreditToken[];
   fundings: Funding[];
   pending: PendingSpend[];
+  /** Absent in vaults made before withdrawals existed. */
+  withdrawals?: Withdrawal[];
 };
 
 export type VaultData = {

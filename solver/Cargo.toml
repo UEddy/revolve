@@ -12,6 +12,7 @@ dotenvy = "0.15"
 hex = "0.4"
 rand = { version = "0.10", default-features = false, features = ["sys_rng"] }
 rusqlite = { version = "0.37", features = ["bundled"] }
+secrecy = "0.8"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 tokio = { version = "1.21.0", features = ["macros", "rt-multi-thread", "signal", "time"] }
@@ -27,6 +28,9 @@ zcash_client_sqlite = { version = "=0.23.0-pre.2", features = ["orchard", "unsta
 zcash_keys = { version = "=0.17.0-pre.2", features = ["orchard", "unstable", "unstable-frost"] }
 zcash_primitives = "=0.31.0-pre.2"
 zcash_protocol = "=0.11.0-pre.1"
+# The withdrawal hot wallet (payer.rs): Sapling parameters bundled, since the builder needs a prover type even for Orchard-only spends.
+zcash_proofs = { version = "=0.31.0-pre.2", features = ["bundled-prover"] }
+zip32 = "0.3"
 
 [patch.crates-io]
 equihash = { git = "https://github.com/zcash/librustzcash.git", rev = "eb38d7a373661179dbc083a2fd58b3a6c9b25818" }
@@ -36,6 +40,7 @@ zcash_client_backend = { git = "https://github.com/zcash/librustzcash.git", rev 
 zcash_client_sqlite = { git = "https://github.com/zcash/librustzcash.git", rev = "eb38d7a373661179dbc083a2fd58b3a6c9b25818" }
 zcash_encoding = { git = "https://github.com/zcash/librustzcash.git", rev = "eb38d7a373661179dbc083a2fd58b3a6c9b25818" }
 zcash_keys = { git = "https://github.com/zcash/librustzcash.git", rev = "eb38d7a373661179dbc083a2fd58b3a6c9b25818" }
+zcash_proofs = { git = "https://github.com/zcash/librustzcash.git", rev = "eb38d7a373661179dbc083a2fd58b3a6c9b25818" }
 zcash_primitives = { git = "https://github.com/zcash/librustzcash.git", rev = "eb38d7a373661179dbc083a2fd58b3a6c9b25818" }
 zcash_protocol = { git = "https://github.com/zcash/librustzcash.git", rev = "eb38d7a373661179dbc083a2fd58b3a6c9b25818" }
 zcash_transparent = { git = "https://github.com/zcash/librustzcash.git", rev = "eb38d7a373661179dbc083a2fd58b3a6c9b25818" }

@@ -372,3 +372,7 @@ details summary { cursor: pointer; font-weight: 600; }
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { animation: none !important; transition: none !important; }
 }
+
+/* ---------- cash out: route choice ---------- */
+.choice { display: flex; flex-direction: column; align-items: flex-start; gap: 6px; width: 100%; text-align: left; cursor: pointer; font: inherit; color: inherit; }
+.choice:active { background: var(--sunk); }

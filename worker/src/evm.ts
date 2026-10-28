@@ -1,5 +1,6 @@
 import { readFileSync } from "node:fs";
-import { createPublicClient, http, keccak256, type Hex, type PublicClient } from "viem";
+import { createPublicClient, getAddress, http, keccak256, toHex, type Hex, type PublicClient } from "viem";
+import type { CashinRail } from "./cashin.ts";
 import { privateKeyToAccount, type PrivateKeyAccount } from "viem/accounts";
 import { base } from "viem/chains";
 import type { Chain } from "./chains.ts";
@@ -88,6 +89,29 @@ export class BasePayer implements EvmChain {
       if (/already known|known transaction|nonce too low|already imported/i.test(String((e as Error).message))) return;
       throw e;
     }
+  }
+
+  /** Base cash-ins (v1.5) pay into this same hot wallet. */
+  cashinRail(perCredit: () => bigint | null): CashinRail {
+    return {
+      payTo: this.address,
+      perCredit,
+      normalizeTx: (tx) => (/^0x[0-9a-fA-F]{64}$/.test(tx) ? tx.toLowerCase() : null),
+      verify: async (tx, min, notBefore, notAfter, fundId) => {
+        const hash = tx as Hex;
+        const status = await this.receipt(hash);
+        if (status === null) return "pending";
+        if (status !== "success") return "bad";
+        const t = await this.client.getTransaction({ hash });
+        // A plain transfer to the hot wallet: value sent by the transaction itself.
+        if (!t.to || getAddress(t.to) !== this.address || t.value < min || t.blockNumber === null) return "bad";
+        // It must name this cash-in in its input data.
+        if (t.input.toLowerCase() !== toHex(fundId)) return "bad";
+        const block = await this.client.getBlock({ blockNumber: t.blockNumber });
+        const at = Number(block.timestamp);
+        return at >= notBefore && at <= notAfter ? "ok" : "bad";
+      },
+    };
   }
 
   async receipt(hash: Hex): Promise<"success" | "reverted" | null> {
