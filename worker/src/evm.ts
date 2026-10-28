@@ -110,7 +110,7 @@ export class BasePayer implements EvmChain {
         if (t.input.toLowerCase() !== toHex(fundId)) return "bad";
         const block = await this.client.getBlock({ blockNumber: t.blockNumber });
         const at = Number(block.timestamp);
-        return at >= notBefore && at <= notAfter ? { ok: true, at } : "bad";
+        return at >= notBefore && at <= notAfter ? { ok: true, at, from: getAddress(t.from), amount: t.value } : "bad";
       },
     };
   }

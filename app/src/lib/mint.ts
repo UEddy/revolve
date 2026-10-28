@@ -107,6 +107,7 @@ const CASHIN_ERRORS: Record<string, string> = {
   tx_used: "That transfer was already used for another cash-in.",
   not_awaiting: "This cash-in is no longer open.",
   price_moved: "The price moved more than 3% between this part's quote and its transfer, so it's held for review and will be sorted out by hand. Nothing is lost.",
+  outside_funds: "Revolve only takes cash-outs from wallets it paid into, up to twice what it paid in. This part is held for review and will be refunded by hand to the wallet it came from.",
 };
 
 export type WithdrawAnswer = { outcome: "queued"; id: string } | { outcome: "spent" | "return" | "keep"; message: string };

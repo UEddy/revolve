@@ -61,6 +61,10 @@ CREATE TABLE IF NOT EXISTS withdrawals (
 -- SHA-256 of cancelled order and funding ids, so a payment that still arrives
 -- for one is held for review as paid_after_cancel. Nothing else is kept.
 CREATE TABLE IF NOT EXISTS cancelled_ids (id_hash TEXT PRIMARY KEY);
+-- Wallets Revolve paid out to (v1.5): a hash of chain and address, what Revolve
+-- paid in and what came back as cash-ins, in lamports or wei. Both amounts are
+-- public on chain already; no order, note or Zcash detail is kept with them.
+CREATE TABLE IF NOT EXISTS funded_wallets (wallet_hash TEXT PRIMARY KEY, paid_in TEXT NOT NULL, returned TEXT NOT NULL DEFAULT '0');
 `;
 
 export function openDb(path: string): DatabaseSync {
