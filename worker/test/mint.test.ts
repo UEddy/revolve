@@ -672,3 +672,37 @@ test("withdrawals pay after their random delay, one at a time, forget the addres
   await runWithdrawals(book, payer, 800_000n);
   assert.equal(payer.sends.length, 3, "waits for the daily cap");
 });
+
+test("once minted, a funding forgets which Zcash note paid it; a re-emitted line for that note changes nothing", () =>
+  withMintApi(async ({ base, book, db }) => {
+    const id = ((await (await json(base, "/mint/orders", { amount_zec: "0.002" })).json()) as { fund_id: string }).fund_id;
+    const line = note(`rv1f|${id}`, 200_000, 3, "0d".repeat(32));
+    book.onNote(line);
+    const b = await blindTokens(2);
+    assert.equal((await json(base, `/mint/orders/${id}/sign`, { blinded: b.blinded })).status, 200);
+    const row = db.prepare("SELECT note_key, status FROM fund_orders WHERE fund_id = ?").get(id) as { note_key: string | null; status: string };
+    assert.deepEqual({ ...row }, { note_key: null, status: "minted" });
+    assert.equal(JSON.stringify(db.prepare("SELECT * FROM fund_orders").all()).includes("0d0d0d"), false, "no trace of the txid in fundings");
+    book.onNote({ ...line, confirmations: 9 });
+    assert.deepEqual(book.reviewNotes(), [], "not mistaken for a second payment");
+  }));
+
+test("fundings minted before that rule are scrubbed when the database opens", async () => {
+  const { mkdtempSync, rmSync } = await import("node:fs");
+  const { tmpdir } = await import("node:os");
+  const { join } = await import("node:path");
+  const { createHash } = await import("node:crypto");
+  const dir = mkdtempSync(join(tmpdir(), "rv-db-"));
+  try {
+    const path = join(dir, "w.sqlite");
+    const a = openDb(path);
+    a.prepare("INSERT INTO fund_orders (fund_id, amount_zat, expires_at, status, note_key) VALUES ('rf_old0000000', 200000, 0, 'minted', 'tx:orchard:0')").run();
+    a.close();
+    const b = openDb(path);
+    assert.equal((b.prepare("SELECT note_key FROM fund_orders").get() as { note_key: string | null }).note_key, null);
+    assert.ok(b.prepare("SELECT 1 FROM settled_notes WHERE note_hash = ?").get(createHash("sha256").update("tx:orchard:0").digest("hex")));
+    b.close();
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});

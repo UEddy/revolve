@@ -1,5 +1,6 @@
 import { chmodSync, existsSync, mkdirSync } from "node:fs";
 import { dirname } from "node:path";
+import { createHash } from "node:crypto";
 import { DatabaseSync } from "node:sqlite";
 
 // Orders hold no IP, user agent or creation time; expiry is the only timestamp.
@@ -93,5 +94,11 @@ export function openDb(path: string): DatabaseSync {
   // NULL means a ZEC funding; `pay_amount` is the quoted lamports or wei.
   if (!fundCols.some((c) => c.name === "source")) db.exec("ALTER TABLE fund_orders ADD COLUMN source TEXT");
   if (!fundCols.some((c) => c.name === "pay_amount")) db.exec("ALTER TABLE fund_orders ADD COLUMN pay_amount TEXT");
+  // Fundings minted before minting forgot their note: forget it now, keeping only its hash.
+  const minted = db.prepare("SELECT fund_id, note_key FROM fund_orders WHERE status = 'minted' AND note_key IS NOT NULL").all() as { fund_id: string; note_key: string }[];
+  for (const m of minted) {
+    db.prepare("INSERT OR IGNORE INTO settled_notes VALUES (?)").run(createHash("sha256").update(m.note_key).digest("hex"));
+    db.prepare("UPDATE fund_orders SET note_key = NULL WHERE fund_id = ?").run(m.fund_id);
+  }
   return db;
 }
