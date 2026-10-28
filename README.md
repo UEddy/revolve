@@ -12,7 +12,7 @@ You pay from your shielded Zcash wallet (Zodl), and the asset lands in a brand-n
 
 ## The problem, proven on mainnet
 
-The common swap routes out of Zcash today deshield. To check, we swapped ZEC through NEAR Intents from Zodl. The resulting Zcash transaction is labelled **"Deshielding (Z-T)"** by the explorer: it has no transparent inputs and one public transparent output of **0.00251649 ZEC** to `t1dCCf1RHzVnkB6KE8d1bzAQypGNktu8zwh`.
+The common swap routes out of Zcash today deshield. To check, I swapped ZEC through NEAR Intents from Zodl. The resulting Zcash transaction is labelled **"Deshielding (Z-T)"** by the explorer: it has no transparent inputs and one public transparent output of **0.00251649 ZEC** to `t1dCCf1RHzVnkB6KE8d1bzAQypGNktu8zwh`.
 
 - Tx [`19d07f8f507039a1b922113c6cc28bfa8414478b198f96d30425d3541da6fe01`](https://mainnet.zcashexplorer.app/transactions/19d07f8f507039a1b922113c6cc28bfa8414478b198f96d30425d3541da6fe01), block 3,531,462
 
@@ -69,7 +69,7 @@ Why this design, and not the alternatives:
 - **No swap provider sees you.** Through a cross-chain swap (Zodl's Swap uses one), the provider must learn both ends: which fresh wallet paid, and which Zcash address to pay. That single record links a position to your Zcash wallet. Here no third party is involved at all.
 - **Revolve can't link them either.** Credits are blind-signed (RFC 9474): the server signs tokens it never sees, so when they come back in a withdrawal it can't tell which cash-in, funding or position they came from. Without that, Revolve would simply be the swap provider, holding the same record.
 - **Amounts and timing are broken up.** The transfer back to Revolve is public on its chain, so the gradual mode, the random delay before every withdrawal, the 0.001 ZEC grid and the coach's warnings (withdrawing right after a cash-in, or exactly the same amount) are what keep it from being paired with the withdrawal.
-- **Fully shielded at the end.** Withdrawals only ever pay an Orchard receiver. We showed on mainnet that the common swap route out of ZEC deshields (see above); how a provider pays back into ZEC is up to the provider, so the exit doesn't depend on one.
+- **Fully shielded at the end.** Withdrawals only ever pay an Orchard receiver. I showed on mainnet that the common swap route out of ZEC deshields (see above); how a provider pays back into ZEC is up to the provider, so the exit doesn't depend on one.
 - **Credits are fungible.** Cashed-out credits can also buy the next position directly, without touching Zcash or any chain in between.
 
 Why there is a ZEC hot wallet on the server, and why that's acceptable:
@@ -96,10 +96,10 @@ Why there is a ZEC hot wallet on the server, and why that's acceptable:
 - **A 0.001 ZEC grid.** Amounts are multiples of 0.001 ZEC, so there are many identical payments to hide among.
 - **A privacy coach.** Each position shows a linkability score with its reasons, and risky moves get a warning first: launch sniping, tiny holder counts, repeat buys, sending to another of your wallets or to a reused address, spending credits right after funding, cashing out right after buying or all at once.
 
-**Leaks we found and closed while building:**
+**Leaks I found and closed while building:**
 
 - **Transparent-address polling.** A full viewing key makes a light wallet ask the lightwalletd server about transparent addresses, which reveals them. The watcher strips the key down to Orchard only, so it never tracks transparent or Sapling receivers.
-- **Request logs at the relay.** The relay started as serverless functions next to the app on Vercel, where the host's request logs would see client IPs. It now runs on our own server with logging off.
+- **Request logs at the relay.** The relay started as serverless functions next to the app on Vercel, where the host's request logs would see client IPs. It now runs on my own server with logging off.
 - **Demo mode in production.** A production build fails if it points at the demo order service or at plain http, and the demo code is stripped from production bundles.
 
 ## Trust boundaries
@@ -113,7 +113,7 @@ Stated plainly, so nobody has to dig for them:
 - **Gradual parts need the app.** A planned part goes out when Revolve is open on your phone at or after its time; the phone holds the keys, so nothing can send for it in the background.
 - **Payouts are public on the destination chain.** Anyone can see the hot wallet pay a fresh wallet and that wallet buy a token. What they can't see is who paid for it.
 - **Privacy grows with the crowd.** Blind credits, the shared hot wallets and the 0.001 ZEC grid hide you among everyone else doing the same thing. While only a handful of people use Revolve, there is little to hide among: amounts and timing narrow it down to you, for Revolve itself above all.
-- **IPs are the operator's to forget.** The order API and the relay both see your IP and log nothing; the relay also sees, in transit, which token a fresh wallet swaps into. You trust that we run them as published. Blind signatures keep the database from linking a funding, a buy and a cash-out; they can't stop an operator who chose to log IPs from noticing the same phone made all three. For the strongest separation, use a VPN or a different network for different steps.
+- **IPs are the operator's to forget.** The order API and the relay both see your IP and log nothing; the relay also sees, in transit, which token a fresh wallet swaps into. You trust that I run them as published. Blind signatures keep the database from linking a funding, a buy and a cash-out; they can't stop an operator who chose to log IPs from noticing the same phone made all three. For the strongest separation, use a VPN or a different network for different steps.
 - **Behaviour can still link you.** Timing and amounts are fingerprints: a buy seconds after a funding, the same unusual amount twice, cashing out a whole position right after buying. The coach warns; it can't prevent.
 - **The mint key is a hot key.** If it leaked, an attacker could forge credits and claim payouts or withdrawals. The loss is bounded by what sits in the capped hot wallets and their daily caps.
 - **Refunds are manual.** A payment that doesn't match an open order exactly is held for review and refunded by hand: a wrong amount, a malformed or unknown memo, a payment after the quote expired, or a second payment to the same order. So is a cash-in held under the abuse protections (a stale quote, or a wallet Revolve didn't pay).
@@ -190,11 +190,11 @@ A full round trip (ZEC to a token and back to shielded ZEC) costs the user about
 What Revolve pays per buy:
 
 - **The payout transaction: 0.000005 SOL.**
-- **Rebalancing: about 0.5% of the order (our estimate, not measured).** Buys leave ZEC at the deposit address and take SOL out of the hot wallet; cash-outs run the other way (SOL in, ZEC out), so only the net imbalance has to be swapped back.
+- **Rebalancing: about 0.5% of the order (my estimate, not measured).** Buys leave ZEC at the deposit address and take SOL out of the hot wallet; cash-outs run the other way (SOL in, ZEC out), so only the net imbalance has to be swapped back.
 
 What the user pays, out of their own payout: the app keeps 0.0025 SOL of it in the fresh wallet for the swap, the token account's rent (0.00204 SOL) and a later sale. It is theirs and stays in their wallet. On the smallest buy that's about a tenth of the payout held back, so bigger buys are better value; the minimum stays at 0.002 ZEC so Revolve can be tried with very little. The Zcash fee on their payment is paid by their own wallet.
 
-Per buy worth V in SOL, Revolve's contribution is **1.5% of V − 0.5% of V − 0.000005 SOL, about 1% at any size**. At about 12.3 SOL per ZEC (the rate at our first mainnet payout):
+Per buy worth V in SOL, Revolve's contribution is **1.5% of V − 0.5% of V − 0.000005 SOL, about 1% at any size**. At about 12.3 SOL per ZEC (the rate at Revolve's first mainnet payout):
 
 | Buy | Worth | Spread earned | Rebalancing (est.) | Contribution |
 |---|---|---|---|---|
@@ -208,7 +208,7 @@ Base works the same way: the payout is the order's value less the spread, and th
 ### Cash-outs and withdrawals
 
 - **A cash-out to credits earns 1.5%** of the SOL or ETH sent back, and costs Revolve nothing: the user's wallet pays the transfer.
-- **A withdrawal costs Revolve nothing**: the 0.0001 ZEC network fee (ZIP-317: 0.00005 ZEC per action, at least two; what our first mainnet withdrawal paid) comes out of the amount. Only a withdrawal that needs more than two actions costs a little more, and Revolve covers the difference.
+- **A withdrawal costs Revolve nothing**: the 0.0001 ZEC network fee (ZIP-317: 0.00005 ZEC per action, at least two; what Revolve's first mainnet withdrawal paid) comes out of the amount. Only a withdrawal that needs more than two actions costs a little more, and Revolve covers the difference.
 
 ### Fixed costs
 
@@ -256,7 +256,7 @@ Revolve's core stays the same for everything below: you pay in shielded ZEC, eve
 - **Lending and borrowing.** Supply assets or borrow against them from a fresh wallet, with collateral that can't be linked to your other positions.
 - **Native apps for iOS and Android.** The same app and passkey vault on the App Store and Google Play, as signed releases.
 - **More chains as payout routes.** Base is built (above); Robinhood Chain is next on the same rules (API_CONTRACT.md v1.4), each a new route behind the same deposit, not a new user flow.
-- **An in-app shielded wallet.** Fund and cash out without leaving the app, once a browser Zcash library supports Ironwood (none does yet; we checked). Trustless exits need it too.
+- **An in-app shielded wallet.** Fund and cash out without leaving the app, once a browser Zcash library supports Ironwood (none does yet; I checked). Trustless exits need it too.
 - **Trustless swaps,** so Revolve never holds your money at any point: see [Path to trustless](#path-to-trustless) below.
 
 Long-lived positions like staking, lending and perps are easier to watch over time than one-off buys, so the privacy coach will extend to them: warnings on reusing a wallet across positions, topping up from a known wallet, or closing everything at once.
