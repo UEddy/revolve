@@ -3,6 +3,8 @@
 // arrives inside the encrypted memo.
 
 import { base58 } from "@scure/base";
+import { isChecksummed } from "./evm.ts";
+import type { Chain } from "./model.ts";
 import { b64url, fromB64url, utf8 } from "./bytes.ts";
 
 const MEMO_MAX_BYTES = 512;
@@ -19,11 +21,14 @@ export function isSolanaPubkey(s: string): boolean {
   }
 }
 
-/** `rv1|<order_id>|<burner_solana_pubkey>`. Throws on anything the worker would send to review. */
-export function buildMemo(orderId: string, burnerPubkey: string): string {
+/**
+ * `rv1|<order_id>|<burner_solana_pubkey>` on Solana, `rv1|<order_id>|base|<address>`
+ * on Base (v1.4). Throws on anything the worker would send to review.
+ */
+export function buildMemo(orderId: string, burnerPubkey: string, chain: Chain = "solana"): string {
   if (!ORDER_ID.test(orderId)) throw new Error("order id is not in the contract's format");
-  if (!isSolanaPubkey(burnerPubkey)) throw new Error("burner key is not a valid address");
-  const memo = `rv1|${orderId}|${burnerPubkey}`;
+  if (chain === "solana" ? !isSolanaPubkey(burnerPubkey) : !isChecksummed(burnerPubkey)) throw new Error("burner key is not a valid address");
+  const memo = chain === "solana" ? `rv1|${orderId}|${burnerPubkey}` : `rv1|${orderId}|${chain}|${burnerPubkey}`;
   if (utf8.encode(memo).length > MEMO_MAX_BYTES) throw new Error("memo over 512 bytes");
   return memo;
 }

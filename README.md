@@ -21,8 +21,9 @@ The amount and the time are now public on Zcash, and they can be matched to the 
 From one app on your phone you can:
 
 - **Buy any Solana token or tokenized stock with liquidity** (via Jupiter), paid in shielded ZEC. Live.
+- **Buy tokens on Base** (via KyberSwap): a hand-checked list, or any token by its contract address. Same shielded payment and credits; the payout is ETH to a fresh Base wallet, and the phone signs the buy. New: its first mainnet run is still to come.
 - **Browse** prediction markets (Polymarket) and NFT collections on Solana, Ethereum and Robinhood Chain. Live, read only: these cards say "Buying coming soon".
-- **Sell** a position to SOL inside its own wallet, **send** it out, or **cash out to Zcash** by handing the SOL to Zodl's built-in Swap (deployed; its first mainnet run is still to come).
+- **Sell** a position to SOL (or ETH on Base) inside its own wallet, **send** it out, or, on Solana, **cash out to Zcash** by handing the SOL to Zodl's built-in Swap (deployed; its first mainnet run is still to come).
 
 No bridge UI, no chain selection, no wallet connection, no gas: each position's wallet gets a small SOL reserve with the payout, and the app signs everything on the device.
 
@@ -31,7 +32,7 @@ No bridge UI, no chain selection, no wallet connection, no gas: each position's 
 ```
  Zodl (your shielded ZEC)
    │  shielded payment to an Orchard-only unified address,
-   │  encrypted memo: rv1|<order id>|<fresh wallet>
+   │  encrypted memo: rv1|<order id>|<fresh wallet>   (Base: rv1|<order id>|base|<0x wallet>)
    ▼
  Zcash ──────────────► watcher (view-only key, lightwalletd over Tor)
                           │ one line per received note
@@ -105,8 +106,8 @@ Both Zcash transactions show as fully shielded on the explorer (Orchard actions,
 | Folder | What it is |
 |---|---|
 | [`solver/`](solver/src/main.rs) | Rust watcher: a view-only Orchard/Ironwood wallet over lightwalletd and Tor (librustzcash). It prints one JSON line per received note, and the `address` and `ufvk` commands print the Orchard-only deposit address and viewing key. |
-| [`worker/`](worker/deploy/DEPLOY.md) | Node order API and payout worker: quotes, memo matching, review queue, delayed SOL payouts from the capped hot wallet, the credits mint. It starts the watcher as a child process. Admin tool: `worker/src/admin.ts`. |
-| [`relay/`](relay/README.md) | No-log privacy relay: Solana RPC, Jupiter, token icons and the read-only Discover feeds (Polymarket, Magic Eden, OpenSea), with no client headers forwarded and allowlisted calls only. |
+| [`worker/`](worker/deploy/DEPLOY.md) | Node order API and payout worker: quotes, memo matching, review queue, delayed SOL payouts from the capped hot wallet (and ETH payouts on Base from a separate one), the credits mint. It starts the watcher as a child process. Admin tool: `worker/src/admin.ts`. |
+| [`relay/`](relay/README.md) | No-log privacy relay: Solana and Base RPC, Jupiter, KyberSwap, token icons and the read-only Discover feeds (Polymarket, Magic Eden, OpenSea), with no client headers forwarded and allowlisted calls only. |
 | [`app/`](app/README.md) | The phone app (PWA): passkey vault, buying, credits, the privacy coach, sell, send and cash out. |
 
 Contracts between the parts: [`API_CONTRACT.md`](API_CONTRACT.md) (order API) and [`CREDITS_CONTRACT.md`](CREDITS_CONTRACT.md) (credits and mint).
@@ -124,7 +125,8 @@ Revolve’s core stays the same for everything below: you pay in shielded ZEC, e
 - Perpetuals and derivatives. Open a leveraged position from shielded ZEC, each margin account in its own fresh wallet, so your trading history can’t be stitched together or copytraded.
 - Staking and restaking. Earn yield on SOL, ETH and liquid staking tokens without the stake being traceable back to your Zcash holdings.
 - Lending and borrowing. Supply assets or borrow against them from a fresh wallet, with collateral that can’t be linked to your other positions.
-- More chains as payout routes. Base and Robinhood Chain are next, with buys routed through KyberSwap, each a new route behind the same deposit, not a new user flow.
+- More chains as payout routes. Base is built (above); Robinhood Chain is next on the same rules (API_CONTRACT.md v1.4), each a new route behind the same deposit, not a new user flow.
+- Cash out to Zcash from Base positions (today they sell to ETH and can be sent out).
 - Fully non-custodial in-app wallet, once a browser Zcash library supports Ironwood (none does yet; we checked).
 
 Long-lived positions like staking, lending and perps are easier to watch over time than one-off buys, so the privacy coach will extend to them: warnings on reusing a wallet across positions, topping up from a known wallet, or closing everything at once.

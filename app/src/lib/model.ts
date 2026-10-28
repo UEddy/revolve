@@ -3,6 +3,9 @@
 
 import type { BurnerKey } from "./burner.ts";
 
+/** Where a position's wallet lives (API_CONTRACT.md v1.4). Absent on a Position means Solana. */
+export type Chain = "solana" | "base";
+
 export type OrderStatus = "awaiting_payment" | "seen" | "confirmed" | "paid_out" | "expired" | "needs_review";
 
 export type TokenRef = {
@@ -33,6 +36,8 @@ export type Stage =
 export type Position = {
   id: string;
   createdAt: number;
+  /** "base": an EVM wallet on Base, whose amounts below are in wei and whose token `mint` is a contract address. */
+  chain?: "base";
   burner: BurnerKey;
   token: TokenRef;
   order: {
@@ -41,6 +46,7 @@ export type Position = {
     bucketZec?: string;
     amountZec: string;
     depositUa: string;
+    /** Lamports, or wei on Base. */
     payoutLamports: string;
     quoteExpiresAt: string;
     status: OrderStatus | "gone";
@@ -49,6 +55,7 @@ export type Position = {
   };
   stage: Stage;
   swap?: { sig?: string; inLamports?: string; outAmount?: string; at?: number; error?: string; attempts: number };
+  /** `lamports` is wei on Base. */
   balance?: { lamports: string; tokenRaw: string; at: number };
   /** `cashout`: SOL sent to a deposit address from Zodl's Swap, to come back as shielded ZEC. */
   sends: { to: string; at: number; sig: string; what: "asset" | "cash"; cashout?: true }[];

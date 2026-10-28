@@ -69,6 +69,12 @@ export function openDb(path: string): DatabaseSync {
   const orderCols = db.prepare("PRAGMA table_info(orders)").all() as { name: string }[];
   if (!orderCols.some((c) => c.name === "pay_after")) db.exec("ALTER TABLE orders ADD COLUMN pay_after INTEGER");
   if (!orderCols.some((c) => c.name === "spend_key")) db.exec("ALTER TABLE orders ADD COLUMN spend_key TEXT");
+  // Payout chains (v1.4): NULL means Solana. On EVM chains payout_lamports holds
+  // wei, and an in-flight payout keeps its signed raw transaction and nonce so an
+  // unknown outcome is resolved by re-broadcasting that same transaction.
+  if (!orderCols.some((c) => c.name === "chain")) db.exec("ALTER TABLE orders ADD COLUMN chain TEXT");
+  if (!orderCols.some((c) => c.name === "payout_raw")) db.exec("ALTER TABLE orders ADD COLUMN payout_raw TEXT");
+  if (!orderCols.some((c) => c.name === "payout_nonce")) db.exec("ALTER TABLE orders ADD COLUMN payout_nonce INTEGER");
   db.exec("CREATE UNIQUE INDEX IF NOT EXISTS orders_spend_key ON orders (spend_key)");
   const fundCols = db.prepare("PRAGMA table_info(fund_orders)").all() as { name: string }[];
   if (!fundCols.some((c) => c.name === "blinded_hash")) db.exec("ALTER TABLE fund_orders ADD COLUMN blinded_hash TEXT");

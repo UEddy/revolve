@@ -9,7 +9,9 @@ import { useVault } from "../state/vault.tsx";
 import { useEngine } from "../state/engine.tsx";
 import { buildMemo } from "../lib/memo.ts";
 import { positionRisk } from "../lib/coach.ts";
-import { MOCK, SOL_MINT } from "../lib/config.ts";
+import { MOCK } from "../lib/config.ts";
+import { cashOf, chainName } from "../lib/chain.ts";
+import { exportEvmKey } from "../lib/evm.ts";
 import { amount, countdown, usd, units } from "../lib/format.ts";
 import type { Position } from "../lib/model.ts";
 import { CANCELLED_TEXT, CancelPayment, Meter, Sheet, Spinner, TokenIcon, TopBar, errorText } from "../components/bits.tsx";
@@ -74,7 +76,7 @@ function Steps({ p }: { p: Position }) {
 
 export function PositionScreen({ id }: { id: string }) {
   const { data, updatePosition, confirm } = useVault();
-  const { prices, busy, retrySwap, sell, cancel, priceOf } = useEngine();
+  const { prices, busy, retrySwap, sell, cancel, pricePosition } = useEngine();
   const [cancelled, setCancelled] = useState(false);
   const [sending, setSending] = useState(false);
   const [selling, setSelling] = useState(false);
@@ -85,11 +87,9 @@ export function PositionScreen({ id }: { id: string }) {
   const p = all.find((x) => x.id === id);
   const mint = p?.token.mint;
   useEffect(() => {
-    if (mint) {
-      priceOf(mint);
-      priceOf(SOL_MINT);
-    }
-  }, [mint, priceOf]);
+    if (p) pricePosition(p);
+    // Once per asset, not on every balance update.
+  }, [mint, pricePosition]);
   if (!p && cancelled) {
     return (
       <div className="screen">
@@ -106,7 +106,11 @@ export function PositionScreen({ id }: { id: string }) {
 
   const held = units(p.balance?.tokenRaw ?? p.swap?.outAmount, p.token.decimals);
   const value = prices[p.token.mint] !== undefined ? held * prices[p.token.mint]! : null;
-  const cash = units(p.balance?.lamports, 9) * (prices[SOL_MINT] ?? 0);
+  const c = cashOf(p);
+  const cash = units(p.balance?.lamports, c.decimals) * (prices[c.mint] ?? 0);
+  // Zodl's Swap takes SOL; Base positions sell to ETH and can be sent out, but not cashed out to Zcash yet.
+  const canCashOut = !p.chain;
+  const tokenHref = p.chain === "base" ? href.baseToken(p.token.mint) : href.token(p.token.mint);
   const risk = positionRisk(p, all);
   const live = p.stage === "held" || p.stage === "closed";
   const doing = busy[p.id];
@@ -119,7 +123,7 @@ export function PositionScreen({ id }: { id: string }) {
         <div className="grow">
           <div className="eyebrow">{p.token.isStock ? "Stock" : "Token"}</div>
           <h1 style={{ margin: "4px 0 0", fontSize: 26 }}>{p.token.name}</h1>
-          <a className="small" href={href.token(p.token.mint)}>{p.token.symbol}</a>
+          <a className="small" href={tokenHref}>{p.token.symbol}</a>{p.chain === "base" && <span className="badge" style={{ marginLeft: 6 }}>Base</span>}
         </div>
       </div>
 
@@ -144,14 +148,14 @@ export function PositionScreen({ id }: { id: string }) {
           {p.stage === "held" && (
             <div className="stack">
               <button className="btn" disabled={!!doing} onClick={() => setSelling(true)}>{doing === "Selling" ? <Spinner /> : null} Sell to cash</button>
-              <button className="btn ghost" disabled={!!doing} onClick={() => setCashingOut(true)}>Cash out to Zcash</button>
+              {canCashOut && <button className="btn ghost" disabled={!!doing} onClick={() => setCashingOut(true)}>Cash out to Zcash</button>}
               <button className="btn ghost" onClick={() => setSending(true)}>Send out</button>
             </div>
           )}
           {p.stage === "closed" && (
             <div className="stack">
-              <p className="muted center">Sold. The cash stays in this wallet.</p>
-              {BigInt(p.balance?.lamports ?? "0") > 0n && (
+              <p className="muted center">Sold. The {c.symbol} stays in this wallet{canCashOut ? "" : "; send it out when you're ready"}.</p>
+              {canCashOut && BigInt(p.balance?.lamports ?? "0") > 0n && (
                 <button className="btn" onClick={() => setCashingOut(true)}>Cash out to Zcash</button>
               )}
             </div>
@@ -164,7 +168,7 @@ export function PositionScreen({ id }: { id: string }) {
             <PayCard
               depositUa={p.order.depositUa}
               amountZec={p.order.amountZec}
-              memo={() => buildMemo(p.order.id, p.burner.pub)}
+              memo={() => buildMemo(p.order.id, p.burner.pub, p.chain)}
               expiresAt={p.order.quoteExpiresAt}
               memoNote="The message tells the payout where to go and is encrypted on chain."
             />
@@ -179,7 +183,7 @@ export function PositionScreen({ id }: { id: string }) {
             <div className="card flat">
               <h3>Quote expired</h3>
               <p className="muted">No payment arrived in time. Nothing was charged. If you did pay, it will be refunded by hand.</p>
-              <button className="btn ghost" onClick={() => go(href.token(p.token.mint))}>Start a new order</button>
+              <button className="btn ghost" onClick={() => go(tokenHref)}>Start a new order</button>
             </div>
           )}
           {p.stage === "needs_review" && (
@@ -207,6 +211,7 @@ export function PositionScreen({ id }: { id: string }) {
         <div className="kv"><span>Order</span><span className="mono">{p.order.id}</span></div>
         <div className="kv"><span>Paid</span><span>{p.order.amountZec} ZEC</span></div>
         <div className="kv"><span>Opened</span><span>{new Date(p.createdAt).toLocaleString()}</span></div>
+        <div className="kv"><span>Chain</span><span>{chainName(p)}</span></div>
         <div className="kv"><span>Wallet</span><span className="mono">{p.burner.pub.slice(0, 6)}…{p.burner.pub.slice(-6)}</span></div>
       </div>
       <div className="spacer" />
@@ -277,8 +282,9 @@ function KeySheet({ open, onClose, p, onReveal, confirm }: { open: boolean; onCl
   );
 }
 
-/** Phantom and Solflare take the 64-byte secret key (seed then public key) as base58. */
+/** Phantom and Solflare take the 64-byte secret key (seed then public key) as base58; MetaMask and Rabby a 0x hex key. */
 function exportKey(p: Position): string {
+  if (p.chain === "base") return exportEvmKey(p.burner);
   const seed = fromB64(p.burner.seed);
   const full = new Uint8Array(64);
   full.set(seed, 0);

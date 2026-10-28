@@ -23,7 +23,10 @@ test("order ids are random base32 with the rv_ prefix", () => {
 });
 
 test("memo parsing", () => {
-  assert.deepEqual(parseMemo(`rv1|rv_0123456789|${burner}`), { orderId: "rv_0123456789", burner });
+  assert.deepEqual(parseMemo(`rv1|rv_0123456789|${burner}`), { orderId: "rv_0123456789", chain: "solana", burner });
+  assert.deepEqual(parseMemo(`rv1|rv_0123456789|base|0xAbC`), { orderId: "rv_0123456789", chain: "base", burner: "0xAbC" });
+  assert.deepEqual(parseMemo(`rv1|rv_0123456789|tron|x`), { orderId: "rv_0123456789", chain: null, burner: "x" });
+  assert.equal(parseMemo(`rv1|rv_0123456789|base|0xAbC|extra`), null);
   assert.equal(parseMemo("rv2|rv_0123456789|x"), null);
   assert.equal(parseMemo("rv1|bad|x"), null);
   assert.equal(parseMemo(null), null);

@@ -4,7 +4,8 @@ import { useEffect, useState } from "react";
 import { tokens, toRef, ultraOrder, usdPrice, isStock, type JupToken } from "../lib/jupiter.ts";
 import { OrderApiError } from "../lib/orders.ts";
 import { MOCK, SOL_MINT, SWAP_RESERVE_LAMPORTS, ZEC_MINT } from "../lib/config.ts";
-import { formatZec, zecToUsd } from "../lib/amount.ts";
+import { formatZec, zecToUsd, type Limits } from "../lib/amount.ts";
+import type { Chain, TokenRef } from "../lib/model.ts";
 import { amountNote, buyWarnings, creditWarnings } from "../lib/coach.ts";
 import { creditsFor } from "../lib/credits.ts";
 import { useCredits, SpendRefused } from "../state/credits.tsx";
@@ -39,14 +40,6 @@ function useToken(mint: string) {
     };
   }, [mint]);
   return { t, error };
-}
-
-function usePrice(mint: string) {
-  const [p, setP] = useState<number | null>(null);
-  useEffect(() => {
-    usdPrice(mint).then(setP, () => {});
-  }, [mint]);
-  return p;
 }
 
 export function TokenScreen({ mint }: { mint: string }) {
@@ -90,24 +83,50 @@ export function TokenScreen({ mint }: { mint: string }) {
           Buy {t.symbol}
         </button>
       </div>
-      <BuySheet open={buying} onClose={() => setBuying(false)} t={t} />
+      <BuySheet open={buying} onClose={() => setBuying(false)} token={toRef(t)} estimate={t.id === SOL_MINT ? undefined : solanaEstimate(t)} />
     </div>
   );
 }
 
-function BuySheet({ open, onClose, t }: { open: boolean; onClose: () => void; t: JupToken }) {
+/** A rough "you get" before any order exists: the amount's value in SOL, minus the reserve, quoted on Jupiter. */
+function solanaEstimate(t: JupToken) {
+  return async (zats: bigint, limits: Limits): Promise<number | null> => {
+    const sol = await usdPrice(SOL_MINT);
+    if (!sol) return null;
+    const lamports = BigInt(Math.floor((zecToUsd(zats, limits) / sol) * 1e9)) - SWAP_RESERVE_LAMPORTS;
+    if (lamports <= 0n) return 0;
+    return units((await ultraOrder(SOL_MINT, t.id, lamports)).outAmount, t.decimals);
+  };
+}
+
+/**
+ * Buying one asset: the amount, credits or a Zodl payment, the coach's
+ * warnings. `chain` picks the payout chain (and the wallet kind); `estimate`
+ * gives the rough amount received, or is absent when there is nothing to swap.
+ */
+export function BuySheet({
+  open,
+  onClose,
+  token: ref,
+  chain = "solana",
+  estimate: estimateFor,
+}: {
+  open: boolean;
+  onClose: () => void;
+  token: TokenRef;
+  chain?: Chain;
+  estimate?: (zats: bigint, limits: Limits) => Promise<number | null>;
+}) {
   const { data } = useVault();
   const { startOrder } = useEngine();
   const { balance, credits, spendOnOrder } = useCredits();
-  const sol = usePrice(SOL_MINT);
-  const [state, refreshLimits] = useLimits(open);
+  const [state, refreshLimits] = useLimits(open, chain);
   const limits = state.phase === "ready" ? state.limits : null;
   const a = useAmount(limits);
   const zats = a.zats;
   const [estimate, setEstimate] = useState<number | null>(null);
   const [busy, setBusy] = useState<"credits" | "zodl" | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const ref = toRef(t);
 
   const need = zats !== null ? creditsFor(zats) : null;
   const enough = need !== null && balance >= need;
@@ -118,15 +137,12 @@ function BuySheet({ open, onClose, t }: { open: boolean; onClose: () => void; t:
     ...(enough ? creditWarnings(need, credits, Date.now()) : []),
   ];
 
-  // A rough "you get" before any order exists: the amount's value in SOL, minus the reserve, quoted on Jupiter.
   useEffect(() => {
-    if (!open || zats === null || !limits || !sol || t.id === SOL_MINT) return setEstimate(null);
+    if (!open || zats === null || !limits || !estimateFor) return setEstimate(null);
     let live = true;
     const timer = setTimeout(() => {
-      const lamports = BigInt(Math.floor((zecToUsd(zats, limits) / sol) * 1e9)) - SWAP_RESERVE_LAMPORTS;
-      if (lamports <= 0n) return live && setEstimate(0);
-      ultraOrder(SOL_MINT, t.id, lamports).then(
-        (q) => live && setEstimate(units(q.outAmount, t.decimals)),
+      estimateFor(zats, limits).then(
+        (n) => live && setEstimate(n),
         () => live && setEstimate(null),
       );
     }, 400);
@@ -135,14 +151,15 @@ function BuySheet({ open, onClose, t }: { open: boolean; onClose: () => void; t:
       clearTimeout(timer);
     };
     // `limits` is compared by its rate only: a refresh with the same rate keeps the estimate.
-  }, [open, zats, limits?.usdPerZec, sol, t.id, t.decimals]);
+    // `estimateFor` is a fresh closure each render; the asset it quotes is fixed for the sheet's life.
+  }, [open, zats, limits?.usdPerZec, ref.mint]);
 
   const run = async (how: "credits" | "zodl") => {
     if (zats === null) return;
     setBusy(how);
     setError(null);
     try {
-      const id = how === "credits" ? await spendOnOrder(ref, formatZec(zats)) : await startOrder(ref, formatZec(zats));
+      const id = how === "credits" ? await spendOnOrder(ref, formatZec(zats), chain) : await startOrder(ref, formatZec(zats), chain);
       onClose();
       go(href.position(id));
     } catch (e) {
@@ -166,9 +183,9 @@ function BuySheet({ open, onClose, t }: { open: boolean; onClose: () => void; t:
   return (
     <Sheet open={open} onClose={onClose}>
       <div className="row" style={{ marginBottom: 14 }}>
-        <TokenIcon src={t.icon} symbol={t.symbol} />
+        <TokenIcon src={ref.icon} symbol={ref.symbol} />
         <div className="grow">
-          <h3>Buy {t.symbol}</h3>
+          <h3>Buy {ref.symbol}{chain === "base" ? " on Base" : ""}</h3>
           <div className="faint">Enter how much to spend.</div>
         </div>
       </div>
@@ -177,9 +194,9 @@ function BuySheet({ open, onClose, t }: { open: boolean; onClose: () => void; t:
         <div className="kv"><span>You pay</span><strong className="num">{zats !== null ? zecLabel(zats) : "–"}</strong></div>
         <div className="kv">
           <span>You get about</span>
-          <span className="num">{t.id === SOL_MINT || zats === null ? "–" : estimate === null ? "…" : `${amount(estimate)} ${t.symbol}`}</span>
+          <span className="num">{!estimateFor || zats === null ? "–" : estimate === null ? "…" : `${amount(estimate)} ${ref.symbol}`}</span>
         </div>
-        <div className="kv"><span>Goes to</span><span>A new wallet, only on this phone</span></div>
+        <div className="kv"><span>Goes to</span><span>A new {chain === "base" ? "Base " : ""}wallet, only on this phone</span></div>
         <div className="kv">
           <span>Your credits</span>
           <span><BalanceText credits={balance} /> · <a href={href.fund} onClick={onClose}>Add funds</a></span>

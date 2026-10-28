@@ -6,13 +6,14 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { useVault } from "./vault.tsx";
 import { newBurner } from "../lib/burner.ts";
+import { newEvmBurner } from "../lib/evm.ts";
 import { random } from "../lib/bytes.ts";
 import { MOCK } from "../lib/config.ts";
 import { parseZec } from "../lib/amount.ts";
 import { afterSignError, balanceCredits, blindFor, creditsFor, importMintKey, keyFingerprint, tokensAfter, unblindAll } from "../lib/credits.ts";
 import { cancelFunding, createFunding, getFunding, getMintKey, signFunding, spend, type MintKey } from "../lib/mint.ts";
 import { OrderApiError } from "../lib/orders.ts";
-import { creditsOf, type CreditToken, type Credits, type Funding, type TokenRef } from "../lib/model.ts";
+import { creditsOf, type Chain, type CreditToken, type Credits, type Funding, type TokenRef } from "../lib/model.ts";
 
 const POLL_MS: [number, number] = [9_000, 18_000];
 const jitter = ([lo, hi]: [number, number]) => lo + Math.random() * (hi - lo);
@@ -43,7 +44,7 @@ type CreditsApi = {
   /** Cancels an unpaid funding and drops it from the vault; throws (and keeps it) if a payment was already seen. */
   cancelFunding(fundId: string): Promise<void>;
   /** Spends credits on a buy after a fresh passkey check; returns the new position's id. */
-  spendOnOrder(token: TokenRef, amountZec: string): Promise<string>;
+  spendOnOrder(token: TokenRef, amountZec: string, chain?: Chain): Promise<string>;
 };
 
 const Ctx = createContext<CreditsApi | null>(null);
@@ -257,7 +258,7 @@ export function CreditsProvider({ children }: { children: ReactNode }) {
         const pos = snapshot()?.positions.find((p) => p.id === sp.positionId);
         const burner = pos?.burner.pub;
         if (!burner) return { ok: false, message: "This order's wallet is missing", final: true };
-        const r = await spend(sp.amountZec, sp.tokens, burner);
+        const r = await spend(sp.amountZec, sp.tokens, burner, pos?.chain ?? "solana");
         const fate = tokensAfter(r.outcome);
         await update((d) => {
           const c = creditsOf(d);
@@ -299,14 +300,14 @@ export function CreditsProvider({ children }: { children: ReactNode }) {
   );
 
   const spendOnOrder = useCallback(
-    async (token: TokenRef, amountZec: string) => {
+    async (token: TokenRef, amountZec: string, chain: Chain = "solana") => {
       const zats = parseZec(amountZec);
       if (zats === null) throw new Error("bad amount");
       const n = creditsFor(zats);
       if (balanceCredits(latest.current) < n) throw new SpendRefused("Not enough credits for this amount.");
       // Fresh user verification before any token leaves the vault.
       await confirm();
-      const burner = newBurner();
+      const burner = chain === "base" ? newEvmBurner() : newBurner();
       const positionId = newId();
       const spendId = newId();
       await update((d) => {
@@ -320,6 +321,7 @@ export function CreditsProvider({ children }: { children: ReactNode }) {
           burner,
           token,
           paidWith: "credits",
+          ...(chain === "base" ? { chain } : {}),
           order: { id: "", amountZec, depositUa: "", payoutLamports: "0", quoteExpiresAt: "", status: "confirmed", confirmations: 0 },
           stage: "sending",
           sends: [],

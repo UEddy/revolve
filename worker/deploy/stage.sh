@@ -58,6 +58,12 @@ QUOTE_TTL_SECS=900
 MAX_OPEN_ORDERS=20
 MINT_KEY_PATH=/opt/revolve/secrets/mint-key.pem
 MINT_KEY_ID=k1
+EVM_KEY_PATH=/opt/revolve/secrets/evm-hotwallet.key
+BASE_RPC_URL=https://mainnet.base.org
+BASE_RESERVE_WEI=200000000000000
+BASE_HOT_WALLET_CAP_WEI=100000000000000000
+BASE_DAILY_PAYOUT_CAP_WEI=100000000000000000
+BASE_GAS_ALLOWANCE_WEI=30000000000000
 EOF
 
 # Keys added to relay.env by hand survive a re-stage (read without printing).
@@ -70,6 +76,7 @@ HOST=127.0.0.1
 SOLANA_RPC_URL=$RPC
 JUP_API_KEY=
 OPENSEA_API_KEY=$OPENSEA_KEY
+BASE_RPC_URL=https://mainnet.base.org
 EOF
 
 # Consistent copies via SQLite's backup API. The worker DB carries the settled
