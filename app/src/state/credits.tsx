@@ -402,8 +402,14 @@ export function CreditsProvider({ children }: { children: ReactNode }) {
           running.add(p.id);
           try {
             await runPart(p.id, i);
-          } catch {
-            // Network trouble or a refused quote: the part stays due and is tried again.
+            if (p.cashoutPlan?.lastError) await update((d) => void delete d.positions.find((y) => y.id === p.id)?.cashoutPlan?.lastError);
+          } catch (e) {
+            // Network trouble or a refused quote: the part stays due and is tried again. Said on the position, never silently.
+            const why = e instanceof TypeError ? "Couldn't reach Revolve" : e instanceof Error ? e.message : String(e);
+            await update((d) => {
+              const plan = d.positions.find((y) => y.id === p.id)?.cashoutPlan;
+              if (plan) plan.lastError = why;
+            }).catch(() => {});
           } finally {
             running.delete(p.id);
           }
