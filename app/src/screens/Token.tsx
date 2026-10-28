@@ -203,8 +203,9 @@ export function BuySheet({
         </div>
       </div>
       <Warnings items={warnings} />
+      <p className="faint center">Buying with credits asks for your passkey first. A small part of the payout stays in the wallet to cover fees and a later sale.</p>
+      <div className="sheet-actions">
       {error && <p className="err">{error}</p>}
-      <div className="spacer" />
       <button className="btn" onClick={() => run("credits")} disabled={busy !== null || !enough}>
         {busy === "credits" ? <Spinner /> : null} {MOCK && enough ? `${creditsLabel} (demo)` : creditsLabel}
       </button>
@@ -217,7 +218,7 @@ export function BuySheet({
       <button className="btn ghost" onClick={() => run("zodl")} disabled={busy !== null || zats === null}>
         {busy === "zodl" ? <Spinner /> : null} Pay from your Zcash wallet instead
       </button>
-      <p className="faint center">Buying with credits asks for your passkey first. A small part of the payout stays in the wallet to cover fees and a later sale.</p>
+      </div>
     </Sheet>
   );
 }
