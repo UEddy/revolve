@@ -4,6 +4,7 @@ import { useState } from "react";
 import { useVault } from "../state/vault.tsx";
 import { MOCK } from "../lib/config.ts";
 import { errorText } from "../components/bits.tsx";
+import { href } from "../router.ts";
 
 function download(name: string, text: string) {
   const url = URL.createObjectURL(new Blob([text], { type: "application/json" }));
@@ -22,6 +23,12 @@ export function Settings() {
   return (
     <div className="screen">
       <h1 style={{ marginTop: 6 }}>Settings</h1>
+
+      <h2>History</h2>
+      <div className="card flat row">
+        <p className="muted grow" style={{ margin: 0 }}>Every transaction with its hash, kept only on this phone. Clear it whenever you like.</p>
+        <a className="btn small ghost" href={href.history}>Open</a>
+      </div>
 
       <h2>Backup</h2>
       <div className="card flat stack">

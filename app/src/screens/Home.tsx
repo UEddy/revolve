@@ -133,6 +133,7 @@ export function Home() {
             ? `across ${holdings.length} private wallet${holdings.length === 1 ? "" : "s"}, none linked to another`
             : "Nothing here yet"}
         </div>
+        <a className="small" href={href.history} style={{ display: "inline-block", marginTop: 8 }}>Transaction history</a>
       </div>
 
       <CreditsCard />
