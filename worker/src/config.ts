@@ -16,7 +16,6 @@ export interface Config {
   dailyPayoutCapLamports: bigint;
   lamportsPerZec: bigint | null;
   spreadBps: number;
-  swapFeeLamports: bigint;
   quoteTtlSecs: number;
   maxOpenOrders: number;
   /** PKCS#8 PEM of the credits mint key, outside any work tree and code folder (keypath.ts); empty or unloadable disables /mint. */
@@ -35,7 +34,6 @@ export interface Config {
     hotWalletCapWei: bigint;
     dailyPayoutCapWei: bigint;
     /** Added to every Base payout: the fresh wallet's gas for its buy and a later sale. */
-    gasAllowanceWei: bigint;
     weiPerZec: bigint | null;
   };
 }
@@ -59,7 +57,6 @@ export function loadConfig(): Config {
     dailyPayoutCapLamports: BigInt(opt("DAILY_PAYOUT_CAP_LAMPORTS", "1000000000")),
     lamportsPerZec: fixedRate === "" ? null : BigInt(fixedRate),
     spreadBps: Number(opt("SPREAD_BPS", "150")),
-    swapFeeLamports: BigInt(opt("SWAP_FEE_LAMPORTS", "5000000")),
     quoteTtlSecs: Number(opt("QUOTE_TTL_SECS", "900")),
     maxOpenOrders: Number(opt("MAX_OPEN_ORDERS", "20")),
     mintKeyPath: opt("MINT_KEY_PATH", ""),
@@ -72,7 +69,6 @@ export function loadConfig(): Config {
       reserveWei: BigInt(opt("BASE_RESERVE_WEI", "200000000000000")),
       hotWalletCapWei: BigInt(opt("BASE_HOT_WALLET_CAP_WEI", "100000000000000000")),
       dailyPayoutCapWei: BigInt(opt("BASE_DAILY_PAYOUT_CAP_WEI", "100000000000000000")),
-      gasAllowanceWei: BigInt(opt("BASE_GAS_ALLOWANCE_WEI", "30000000000000")),
       weiPerZec: opt("WEI_PER_ZEC", "") === "" ? null : BigInt(opt("WEI_PER_ZEC", "")),
     },
   };

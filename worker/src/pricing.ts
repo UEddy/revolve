@@ -5,20 +5,20 @@ const PRICE_URL = "https://api.coingecko.com/api/v3/simple/price?ids=zcash,solan
 const REFRESH_MS = 60_000;
 const MAX_AGE_MS = 10 * 60_000;
 
+// A payout is the order's value at the market rate less the spread, nothing
+// added: the fresh wallet's own gas comes out of it (the app keeps a little back
+// for its swap and a later sale), so no order costs Revolve more than it earns.
+
 export class Pricing {
   private readonly fixed: bigint | null;
-  private readonly spreadBps: number;
-  private readonly swapFeeLamports: bigint;
+  readonly spreadBps: number;
   private readonly fixedWei: bigint | null;
-  private readonly gasAllowanceWei: bigint;
   private live: { lamportsPerZec: number; weiPerZec: number | null; usdPerZec: number; at: number } | null = null;
 
-  constructor(opts: { lamportsPerZec: bigint | null; spreadBps: number; swapFeeLamports: bigint; weiPerZec?: bigint | null; gasAllowanceWei?: bigint }) {
+  constructor(opts: { lamportsPerZec: bigint | null; spreadBps: number; weiPerZec?: bigint | null }) {
     this.fixed = opts.lamportsPerZec;
     this.spreadBps = opts.spreadBps;
-    this.swapFeeLamports = opts.swapFeeLamports;
     this.fixedWei = opts.weiPerZec ?? null;
-    this.gasAllowanceWei = opts.gasAllowanceWei ?? 0n;
   }
 
   /** Runs with a fixed rate too: GET /limits still needs the indicative USD price. */
@@ -28,24 +28,24 @@ export class Pricing {
     setInterval(tick, REFRESH_MS).unref();
   }
 
-  /** Payout for an order amount, after spread, plus the swap fee allowance. Null if no fresh price. */
+  /** Payout for an order amount, after the spread. Null if no fresh price. */
   payoutLamports(amountZat: bigint): bigint | null {
     let perZec: bigint;
     if (this.fixed !== null) perZec = this.fixed;
     else if (this.fresh()) perZec = BigInt(Math.floor(this.live!.lamportsPerZec));
     else return null;
     const gross = (amountZat * perZec) / 100_000_000n;
-    return (gross * BigInt(10_000 - this.spreadBps)) / 10_000n + this.swapFeeLamports;
+    return (gross * BigInt(10_000 - this.spreadBps)) / 10_000n;
   }
 
-  /** Base payout in wei for an order amount, after spread, plus the gas allowance. Null if no fresh ETH price. */
+  /** Base payout in wei for an order amount, after the spread. Null if no fresh ETH price. */
   payoutWei(amountZat: bigint): bigint | null {
     let perZec: bigint;
     if (this.fixedWei !== null) perZec = this.fixedWei;
     else if (this.fresh() && this.live!.weiPerZec !== null) perZec = BigInt(Math.floor(this.live!.weiPerZec));
     else return null;
     const gross = (amountZat * perZec) / 100_000_000n;
-    return (gross * BigInt(10_000 - this.spreadBps)) / 10_000n + this.gasAllowanceWei;
+    return (gross * BigInt(10_000 - this.spreadBps)) / 10_000n;
   }
 
   /**

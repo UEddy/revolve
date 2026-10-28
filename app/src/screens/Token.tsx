@@ -4,7 +4,7 @@ import { useEffect, useState } from "react";
 import { tokens, toRef, ultraOrder, usdPrice, isStock, type JupToken } from "../lib/jupiter.ts";
 import { OrderApiError } from "../lib/orders.ts";
 import { MOCK, SOL_MINT, SWAP_RESERVE_LAMPORTS, ZEC_MINT } from "../lib/config.ts";
-import { formatZec, zecToUsd, type Limits } from "../lib/amount.ts";
+import { afterSpread, formatZec, zecToUsd, type Limits } from "../lib/amount.ts";
 import type { Chain, TokenRef } from "../lib/model.ts";
 import { amountNote, buyWarnings, creditWarnings } from "../lib/coach.ts";
 import { creditsFor } from "../lib/credits.ts";
@@ -93,7 +93,8 @@ function solanaEstimate(t: JupToken) {
   return async (zats: bigint, limits: Limits): Promise<number | null> => {
     const sol = await usdPrice(SOL_MINT);
     if (!sol) return null;
-    const lamports = BigInt(Math.floor((zecToUsd(zats, limits) / sol) * 1e9)) - SWAP_RESERVE_LAMPORTS;
+    // The payout (after the spread), less what stays in the wallet for gas.
+    const lamports = BigInt(Math.floor((afterSpread(zecToUsd(zats, limits), limits) / sol) * 1e9)) - SWAP_RESERVE_LAMPORTS;
     if (lamports <= 0n) return 0;
     return units((await ultraOrder(SOL_MINT, t.id, lamports)).outAmount, t.decimals);
   };
