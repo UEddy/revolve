@@ -4,11 +4,11 @@
 
 Live app: **https://revolveapp-phi.vercel.app** (order API: `https://revolveapp.duckdns.org`)
 
-> **Trying it live: buys are small on purpose.** The largest buy is limited by how much SOL the payout hot wallet holds, after what paid orders waiting for their payout already hold. Right now that allows about **0.005 ZEC per buy** (the minimum is 0.002 ZEC, in steps of 0.001). The app's amount screen always shows the current maximum, and so does [`/limits`](https://revolveapp.duckdns.org/limits) (`max_zec`). Larger amounts are refused before you pay. A quote reserves nothing until you pay, so if several people pay at once for more than the wallet holds, a payout waits until it's topped up.
->
-> **Withdrawals are small on purpose too.** Credits are withdrawn to shielded ZEC from a separate withdrawal hot wallet that holds only a little ZEC, and 0.0005 ZEC of it is always kept back for network fees. So a withdrawal is capped by what that wallet holds at the time: a few credits at most while it's being tested, and it is topped up by hand. A withdrawal it can't cover is refused before anything is spent, and the credits stay in your balance; try a smaller amount.
+> **Trying it live: amounts are small on purpose.** The hot wallets are funded for testing, so a buy is 0.002 to about **0.005 ZEC** (in steps of 0.001) and a withdrawal is a few credits at most. The app always shows the current limits, and so does [`/limits`](https://revolveapp.duckdns.org/limits). Anything Revolve can't cover is refused before you pay, or before any credit is spent.
 
 You pay from your shielded Zcash wallet (Zodl), and the asset lands in a brand-new wallet on the destination chain that holds that one position and nothing else. There are no accounts, no wallet connection, no gas to manage and no seed phrase: a passkey on your phone opens an encrypted vault that holds every position's key. Nothing on the Zcash side becomes public, and nothing on the destination side points back to you or to your other positions.
+
+**Contents:** [The problem](#the-problem-proven-on-mainnet) · [What Revolve does](#what-revolve-does) · [How it works](#how-it-works) · [Why it does not leak](#why-it-does-not-leak) · [Trust boundaries](#trust-boundaries) · [Abuse protections](#abuse-protections) · [Proven on mainnet](#proven-on-mainnet) · [vs. NEAR Intents](#how-revolve-differs-from-near-intents) · [FAQ](#faq) · [Business model](#business-model-and-unit-economics) · [Architecture](#architecture-and-repo-map) · [Run it yourself](#run-it-yourself) · [Roadmap](#roadmap) · [Path to trustless](#path-to-trustless)
 
 ## The problem, proven on mainnet
 
@@ -72,7 +72,7 @@ Why this design, and not the alternatives:
 - **Fully shielded at the end.** Withdrawals only ever pay an Orchard receiver. We showed on mainnet that the common swap route out of ZEC deshields (see above); how a provider pays back into ZEC is up to the provider, so the exit doesn't depend on one.
 - **Credits are fungible.** Cashed-out credits can also buy the next position directly, without touching Zcash or any chain in between.
 
-Why a ZEC hot wallet is on the server now, and why it's acceptable:
+Why there is a ZEC hot wallet on the server, and why that's acceptable:
 
 - Paying someone shielded ZEC needs a spending key; a view-only key can't. So withdrawals need one.
 - **It's a separate wallet, not the deposit address.** Its own seed, generated on the server, holding only what an operator moves into it. The deposit address's spending key stays off the server, as before, so deposits in flight are never at risk from it.
@@ -123,14 +123,14 @@ Stated plainly, so nobody has to dig for them:
 How Revolve keeps people from gaming it, and what is still open:
 
 - **Stale quotes can't be picked off.** Quotes last 10 minutes. Before paying out, the worker checks the quote against the price at that moment. If the market moved against Revolve by more than 3% (`MAX_PRICE_MOVE_BPS`), the payout is re-priced at the current rate; a move in your favour keeps the quote. Without a fresh price, payouts wait. A cash-in is priced as of the moment its transfer landed, from the rates the worker saw then; past a 3% move it is held for review and refunded by hand.
-- **Quotes can't lock up the hot wallet.** A quote reserves nothing until its payment is seen, and unpaid quotes don't count toward the cap of 20 open orders, so spamming quotes blocks nobody. Expired unpaid quotes are deleted after a day.
+- **Quotes can't lock up the hot wallet.** A quote reserves nothing until its payment is seen, and unpaid quotes don't count toward the cap of 20 open orders, so spamming quotes blocks nobody. Expired unpaid quotes are deleted after a day. The trade-off: if several people pay at once for more than the hot wallet holds, a payout waits until it's topped up.
 - **Hot wallets are bounded.** Small balances, a cap on each wallet and daily payout caps (Solana, Base, withdrawals). The deposit address's spending key isn't on the server, and withdrawals go one at a time after a random 20 to 120 minutes.
 - **Nothing pays twice.** Spent credits are remembered by hash forever, every payout is stored before it is broadcast and settled by looking it up, and a cash-in transaction can fund only once.
 - **A clone can't open your vault.** Passkeys only work on the real site, and the app runs only its own code and talks only to the servers it lists.
 - **Revolve only takes back coins it handed out.** A cash-in must come from a wallet Revolve paid into, and a wallet can send back at most twice what Revolve paid it (`CASHIN_MAX_MULTIPLE`), which leaves room for real trading gains. Anything else is held for review and refunded to the wallet it came from. So outside money, stolen funds for example, can't be turned into credits and withdrawn as private ZEC. Revolve keeps a hash of each payout's wallet with the amounts paid in and sent back, which are public on chain anyway; no order or Zcash detail goes with them.
 - **Rate limits** on the order API and the relay, which forwards allowlisted calls only.
 
-Not covered yet:
+Still open:
 
 - Within that 2× allowance, gains can't be told apart from money moved in through a rigged trade: someone could launder up to what they first bought through Revolve, with real shielded ZEC. The caps (0.05 ZEC per part, the daily withdrawal cap) bound it.
 - The rate limits are global, by design: Revolve keeps no per-user state, so a flood of requests slows everyone down rather than one client.
@@ -141,10 +141,9 @@ Not covered yet:
 | Step | Transaction |
 |---|---|
 | Shielded deposit: 0.005 ZEC to the Orchard-only address, landed in Ironwood, block 3,531,565 | [`bef498e89249127a1fb93457305b3b447bb11e831f340fda42ff25c6da1d63fd`](https://mainnet.zcashexplorer.app/transactions/bef498e89249127a1fb93457305b3b447bb11e831f340fda42ff25c6da1d63fd) |
-| Payout: 0.065380967 SOL from the hot wallet to a fresh wallet | [`4uTmgrG2…QtTGd8m2`](https://solscan.io/tx/4uTmgrG2wcg66VkmFFfEzk8nD8KazRaiGQ2maQFwSLVbb1WMaSRg7JUCXfzdGBakZijhsEqxiZDesZx6QtTGd8m2) |
+| Payout: 0.065380967 SOL from the hot wallet to a fresh wallet (test payouts then added 0.005 SOL for gas on top; payouts no longer add anything) | [`4uTmgrG2…QtTGd8m2`](https://solscan.io/tx/4uTmgrG2wcg66VkmFFfEzk8nD8KazRaiGQ2maQFwSLVbb1WMaSRg7JUCXfzdGBakZijhsEqxiZDesZx6QtTGd8m2) |
 | Buy on the device: that wallet bought 330,983 BONK, 4 minutes later | [`KPoQSXNf…Rq3pPe`](https://solscan.io/tx/KPoQSXNf4NFaJL6tbYUCsjx9pxCbU5bBq8YTRt9SuCEZtQhKBGCEwxBJEDH35vSWZamMp9VgwDGTdnHUwRq3pPe) |
 | Wrong-memo payment: 0.0005 ZEC with a malformed memo, held for review, not paid out | [`b3bf882c70d4d2f67f8e4e5554e5056aaad9eba9c3c3944befbf0d53a575c2e3`](https://mainnet.zcashexplorer.app/transactions/b3bf882c70d4d2f67f8e4e5554e5056aaad9eba9c3c3944befbf0d53a575c2e3) |
-
 
 The deposit and the wrong-memo payment both show as fully shielded on the explorer (Orchard actions, no transparent inputs or outputs). The worker's database holds no record of the paid order any more, only a hash of the deposit note, which matches this deposit.
 
@@ -239,7 +238,7 @@ What Revolve pays per buy:
 
 What the user pays, out of their own payout: the app keeps 0.0025 SOL of it in the fresh wallet for the swap, the token account's rent (0.00204 SOL) and a later sale. It is theirs and stays in their wallet. On the smallest buy that's about a tenth of the payout held back, so bigger buys are better value; the minimum stays at 0.002 ZEC so Revolve can be tried with very little. The Zcash fee on their payment is paid by their own wallet.
 
-Per buy worth V in SOL, Revolve's contribution is **1.5% of V − 0.5% of V − 0.000005 SOL, about 1% at any size**. At the ZEC/SOL rate of our first mainnet payout (about 12.3 SOL per ZEC):
+Per buy worth V in SOL, Revolve's contribution is **1.5% of V − 0.5% of V − 0.000005 SOL, about 1% at any size**. At about 12.3 SOL per ZEC (the rate at our first mainnet payout):
 
 | Buy | Worth | Spread earned | Rebalancing (est.) | Contribution |
 |---|---|---|---|---|
@@ -249,8 +248,6 @@ Per buy worth V in SOL, Revolve's contribution is **1.5% of V − 0.5% of V − 
 | 0.05 ZEC (the cap per funding) | 0.61 SOL | 0.0092 SOL | 0.0031 SOL | +0.0061 SOL (+1%) |
 
 Base works the same way: the payout is the order's value less the spread, and the app keeps 0.00002 ETH of it for the wallet's gas.
-
-Our first test payouts added 0.005 SOL of gas money on top of each payout, which made every small buy a loss (−19% of a minimum buy). We removed that: payouts are now the order's value less the spread, nothing added, and the app's own reserve covers the wallet's gas.
 
 ### Cash-outs and withdrawals
 
@@ -295,15 +292,15 @@ Contracts between the parts: [`API_CONTRACT.md`](API_CONTRACT.md) (order API) an
 
 ## Roadmap
 
-Revolve’s core stays the same for everything below: you pay in shielded ZEC, every position lives in its own fresh wallet, and our server never holds your positions’ keys or learns who holds them.
+Revolve's core stays the same for everything below: you pay in shielded ZEC, every position lives in its own fresh wallet, and the server never holds your positions' keys or learns who holds them.
 
-- Buying prediction markets and NFTs across chains. Browsing is already built (read only) for Polymarket and for Solana, Ethereum and Robinhood Chain collections.
-- Perpetuals and derivatives. Open a leveraged position from shielded ZEC, each margin account in its own fresh wallet, so your trading history can’t be stitched together or copytraded.
-- Staking and restaking. Earn yield on SOL, ETH and liquid staking tokens without the stake being traceable back to your Zcash holdings.
-- Lending and borrowing. Supply assets or borrow against them from a fresh wallet, with collateral that can’t be linked to your other positions.
-- More chains as payout routes. Base is built (above); Robinhood Chain is next on the same rules (API_CONTRACT.md v1.4), each a new route behind the same deposit, not a new user flow.
-- Fully non-custodial in-app wallet, once a browser Zcash library supports Ironwood (none does yet; we checked).
-- Trustless swaps, so Revolve never holds your money at any point: see [Path to trustless](#path-to-trustless) below.
+- **Prediction markets and NFTs.** Buying across chains; browsing is already built (read only) for Polymarket and for Solana, Ethereum and Robinhood Chain collections.
+- **Perpetuals and derivatives.** Open a leveraged position from shielded ZEC, each margin account in its own fresh wallet, so your trading history can't be stitched together or copytraded.
+- **Staking and restaking.** Earn yield on SOL, ETH and liquid staking tokens without the stake being traceable back to your Zcash holdings.
+- **Lending and borrowing.** Supply assets or borrow against them from a fresh wallet, with collateral that can't be linked to your other positions.
+- **More chains as payout routes.** Base is built (above); Robinhood Chain is next on the same rules (API_CONTRACT.md v1.4), each a new route behind the same deposit, not a new user flow.
+- **An in-app shielded wallet.** Fund and cash out without leaving the app, once a browser Zcash library supports Ironwood (none does yet; we checked). Trustless exits need it too.
+- **Trustless swaps,** so Revolve never holds your money at any point: see [Path to trustless](#path-to-trustless) below.
 
 Long-lived positions like staking, lending and perps are easier to watch over time than one-off buys, so the privacy coach will extend to them: warnings on reusing a wallet across positions, topping up from a known wallet, or closing everything at once.
 
