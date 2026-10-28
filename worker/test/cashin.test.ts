@@ -31,7 +31,11 @@ function conn(tx: null | { err?: unknown; pre: number; post: number; blockTime: 
 test("Solana cash-in check: the hot wallet's own balance rise, in the quote's window, on a successful transaction", async () => {
   const v = (c: Connection) => solanaRail(c, hot.toBase58(), () => 1n).verify(sig, 264_000n, 1_000, 2_000, FUND);
   assert.equal(await v(conn(null)), "pending");
-  assert.deepEqual(await v(conn({ pre: 5, post: 264_005, blockTime: 1_500 })), { ok: true, at: 1_500 }, "with when it landed");
+  assert.deepEqual(
+    await v(conn({ pre: 5, post: 264_005, blockTime: 1_500 })),
+    { ok: true, at: 1_500, from: sender.toBase58(), amount: 264_000n },
+    "with when it landed, who sent it and what arrived",
+  );
   assert.equal(await v(conn({ pre: 5, post: 264_004, blockTime: 1_500 })), "bad", "one lamport short");
   assert.equal(await v(conn({ pre: 5, post: 264_005, blockTime: 999 })), "bad", "before the quote");
   assert.equal(await v(conn({ pre: 5, post: 264_005, blockTime: 2_001 })), "bad", "after the grace window");
@@ -42,4 +46,46 @@ test("Solana cash-in check: the hot wallet's own balance rise, in the quote's wi
   const rail = solanaRail(conn(null), hot.toBase58(), () => 1n);
   assert.equal(rail.normalizeTx(sig), sig);
   assert.equal(rail.normalizeTx("0x" + "ab".repeat(32)), null);
+});
+
+/** A connection whose transactions are given by signature, for the first-funding lookup. */
+function history(sigs: string[], txs: Record<string, { keys: PublicKey[]; pre: number[]; post: number[] }>): Connection {
+  return {
+    getSignaturesForAddress: async () => sigs.map((signature) => ({ signature })),
+    getTransaction: async (s: string) => {
+      const t = txs[s];
+      return t && {
+        meta: { err: null, preBalances: t.pre, postBalances: t.post, loadedAddresses: undefined },
+        transaction: { message: { getAccountKeys: () => ({ keySegments: () => [t.keys] }) } },
+      };
+    },
+  } as unknown as Connection;
+}
+
+test("a cash-in must be paid by the wallet that signs it: no third account's SOL", async () => {
+  const third = Keypair.generate().publicKey;
+  const c = {
+    getTransaction: async () => ({
+      blockTime: 1_500,
+      meta: { err: null, preBalances: [1e9, 5, 0, 5e8], postBalances: [1e9 - 5000, 264_005, 0, 5e8 - 264_000], loadedAddresses: undefined },
+      transaction: {
+        message: {
+          getAccountKeys: () => ({ keySegments: () => [[sender, hot, memo, third]] }),
+          compiledInstructions: [{ programIdIndex: 2, accountKeyIndexes: [], data: Buffer.from(FUND) }],
+        },
+      },
+    }),
+  } as unknown as Connection;
+  assert.equal(await solanaRail(c, hot.toBase58(), () => 1n).verify(sig, 264_000n, 1_000, 2_000, FUND), "bad");
+});
+
+test("first funding: what Revolve's payout put in, only if Revolve's payout was the wallet's first transaction", async () => {
+  const rail = (c: Connection) => solanaRail(c, hot.toBase58(), () => 1n);
+  const w = sender.toBase58();
+  const payout = { keys: [hot, sender], pre: [1e9, 0], post: [1e9 - 60_005_000, 60_000_000] };
+  assert.equal(await rail(history(["later", "first"], { first: payout })).firstFunding!(w), 60_000_000n);
+  const outside = { keys: [Keypair.generate().publicKey, sender], pre: [1e9, 0], post: [9e8, 1e8] };
+  assert.equal(await rail(history(["later", "first"], { first: outside })).firstFunding!(w), null, "first funded by someone else");
+  assert.equal(await rail(history([], {})).firstFunding!(w), null, "no history");
+  assert.equal(await rail(history(Array.from({ length: 1000 }, (_, i) => `s${i}`), {})).firstFunding!(w), null, "too long a history");
 });
