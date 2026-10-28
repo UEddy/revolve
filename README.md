@@ -197,8 +197,8 @@ The deposit address's spending key isn't on it, so deposits are safe. The hot wa
 **What if I lose my phone?**
 Settings → "Save encrypted backup" gives you a file that is useless without your passkey. On a new phone, "Restore from backup" with the same passkey (synced by Google Password Manager or iCloud Keychain) brings back every wallet and credit. Without a backup, they're gone: nothing is ever stored on a server.
 
-**Why a web app (PWA) and not an app-store app?**
-Passkeys with the WebAuthn PRF extension work in Chrome on Android and Safari on iPhone, so the vault needs no app store, account or seed phrase. The trade-off is trusting the hosted code, which reproducible, hash-pinned builds address ([Path to trustless](#path-to-trustless)).
+**Why a web app (PWA) first?**
+It was the fastest way to reach both platforms at once: passkeys with the WebAuthn PRF extension work in Chrome on Android and Safari on iPhone, so the vault needs no account, seed phrase or install. Native apps for the App Store and Google Play are planned, on the same vault design. They also ease the web app's main trade-off, trusting the code the server serves on each visit, since store releases are signed, versioned builds; until then, reproducible, hash-pinned web builds address it ([Path to trustless](#path-to-trustless)).
 
 **Why Solana first?**
 Jupiter routes almost any token and tokenized stocks, fees are a fraction of a cent, and swaps land in seconds. Base is built on the same rules and browse-only until its hot wallet is funded and tested.
@@ -210,7 +210,7 @@ The shielded pool NU6.3 activated on mainnet (block 3,428,143). Revolve's addres
 A 1.5% spread on buys and on cash-outs to credits; network fees are paid by whoever's transaction it is. See [Business model and unit economics](#business-model-and-unit-economics).
 
 **What would you do next?**
-Trust-minimised custody first (keys split across independent people, proof of reserves, pinned builds), then trustless swaps with an audit, then routing the app over Tor or Oblivious HTTP, and the products in the [Roadmap](#roadmap).
+Trust-minimised custody first (keys split across independent people, proof of reserves, pinned builds), then trustless swaps with an audit, then routing the app over Tor or Oblivious HTTP, native apps for both app stores, and the products in the [Roadmap](#roadmap).
 
 ## Business model and unit economics
 
@@ -296,6 +296,7 @@ Revolve's core stays the same for everything below: you pay in shielded ZEC, eve
 - **Perpetuals and derivatives.** Open a leveraged position from shielded ZEC, each margin account in its own fresh wallet, so your trading history can't be stitched together or copytraded.
 - **Staking and restaking.** Earn yield on SOL, ETH and liquid staking tokens without the stake being traceable back to your Zcash holdings.
 - **Lending and borrowing.** Supply assets or borrow against them from a fresh wallet, with collateral that can't be linked to your other positions.
+- **Native apps for iOS and Android.** The same app and passkey vault on the App Store and Google Play, as signed releases.
 - **More chains as payout routes.** Base is built (above); Robinhood Chain is next on the same rules (API_CONTRACT.md v1.4), each a new route behind the same deposit, not a new user flow.
 - **An in-app shielded wallet.** Fund and cash out without leaving the app, once a browser Zcash library supports Ironwood (none does yet; we checked). Trustless exits need it too.
 - **Trustless swaps,** so Revolve never holds your money at any point: see [Path to trustless](#path-to-trustless) below.
