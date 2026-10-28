@@ -5,12 +5,16 @@
 //!   revolve-watcher payer-keygen <seed file>       new random seed, mode 600, never overwritten
 //!   revolve-watcher payer-address                  its Orchard-only address, to fund it
 //!   revolve-watcher payer-balance                  sync, then {"spendable_zat":..,"total_zat":..}
-//!   revolve-watcher payer-send <id> <ua> <zat>     sync, pay, then {"txid":".."}
+//!   revolve-watcher payer-send <id> <ua> <zat>     sync, pay, then {"txid":"..","confirmations":n}
 //!   revolve-watcher payer-check-address <ua>       exit 0 if it is a valid withdrawal address (no network)
 //!
 //! `payer-send` is idempotent per withdrawal id: the signed transaction is stored
 //! under the id before it is broadcast, and a retry re-broadcasts those same bytes,
-//! which can never pay twice (the notes it spends can only be spent once).
+//! which can never pay twice (the notes it spends can only be spent once). A retry
+//! also reports how many confirmations that transaction has (0 until mined), so the
+//! worker keeps a withdrawal until it is mined. Only a transaction that expired
+//! unmined, well past its expiry height, is replaced by a new one: it can never be
+//! mined any more, so the new one can't pay twice either.
 
 use std::{env, io::Write, os::unix::fs::OpenOptionsExt, path::PathBuf};
 
@@ -39,12 +43,15 @@ use zcash_client_backend::{
 use zcash_client_sqlite::{WalletDb, wallet::init::init_wallet_db};
 use zcash_keys::address::{Address, UnifiedAddress};
 use zcash_proofs::prover::LocalTxProver;
-use zcash_protocol::{ShieldedPool, consensus::Network, value::Zatoshis};
+use zcash_protocol::{ShieldedPool, TxId, consensus::Network, value::Zatoshis};
 
 use crate::{Db, Lwd, cache::MemCache, connect_lwd, enhance};
 
 const ACCOUNT_NAME: &str = "revolve-payer";
 const BATCH_SIZE: u32 = 1000;
+/// Blocks past its expiry height before an unmined transaction counts as gone for
+/// good, so a short reorg can't bring it back after a replacement is built.
+const EXPIRY_MARGIN: u32 = 10;
 
 struct PayerConfig {
     seed_path: PathBuf,
@@ -128,8 +135,8 @@ pub async fn run(cmd: &str, args: &[String]) -> anyhow::Result<()> {
         }
         "payer-send" => {
             let [id, ua, zat] = args else { bail!("usage: payer-send <withdrawal id> <unified address> <zatoshis>") };
-            let txid = send(&cfg, id, ua, zat.parse().context("amount must be zatoshis")?).await?;
-            println!("{}", serde_json::json!({ "txid": txid }));
+            let (txid, confirmations) = send(&cfg, id, ua, zat.parse().context("amount must be zatoshis")?).await?;
+            println!("{}", serde_json::json!({ "txid": txid, "confirmations": confirmations }));
             Ok(())
         }
         other => bail!("unknown payer command {other:?}"),
@@ -223,7 +230,30 @@ async fn broadcast(client: &mut Lwd, raw: Vec<u8>) -> anyhow::Result<()> {
     Ok(())
 }
 
-async fn send(cfg: &PayerConfig, id: &str, ua: &str, zat: u64) -> anyhow::Result<String> {
+/// Where a stored withdrawal transaction stands, as of the synced wallet.
+#[derive(Debug, PartialEq, Eq)]
+enum SendState {
+    /// In a block, with this many confirmations.
+    Mined(u32),
+    /// Not in a block, and still able to be.
+    Pending,
+    /// Never mined and well past its expiry height: it can never pay now.
+    Expired,
+}
+
+/// `mined` and `expiry` are the transaction's block and expiry heights (expiry 0
+/// never expires), `tip` the wallet's synced chain height.
+fn send_state(mined: Option<u32>, expiry: Option<u32>, tip: Option<u32>) -> SendState {
+    match (mined, expiry, tip) {
+        (Some(h), _, Some(t)) => SendState::Mined(t.saturating_sub(h) + 1),
+        (Some(_), _, None) => SendState::Mined(1),
+        (None, Some(e), Some(t)) if e != 0 && t > e.saturating_add(EXPIRY_MARGIN) => SendState::Expired,
+        _ => SendState::Pending,
+    }
+}
+
+/// Pays a withdrawal once; returns its txid and confirmations (0 until mined).
+async fn send(cfg: &PayerConfig, id: &str, ua: &str, zat: u64) -> anyhow::Result<(String, u32)> {
     if !id.starts_with("rw_") || id.len() > 64 {
         bail!("bad withdrawal id");
     }
@@ -236,9 +266,23 @@ async fn send(cfg: &PayerConfig, id: &str, ua: &str, zat: u64) -> anyhow::Result
 
     let (mut db, mut client) = open_synced(cfg).await?;
     if let Some((txid, raw)) = prior {
-        info!("withdrawal {id} was signed before; re-broadcasting {txid}");
-        broadcast(&mut client, raw).await?;
-        return Ok(txid);
+        let parsed = TxId::from_hex(&txid).context("a stored txid is malformed")?;
+        let tip = db.chain_height()?.map(u32::from);
+        let mined = db.get_tx_height(parsed)?.map(u32::from);
+        // Unknown to the wallet (e.g. a new data dir): no expiry to go by, so it is only re-broadcast.
+        let expiry = db.get_transaction(parsed)?.map(|t| u32::from(t.expiry_height()));
+        match send_state(mined, expiry, tip) {
+            SendState::Mined(confirmations) => return Ok((txid, confirmations)),
+            SendState::Pending => {
+                info!("withdrawal {id} was signed before and isn't mined yet; re-broadcasting {txid}");
+                broadcast(&mut client, raw).await?;
+                return Ok((txid, 0));
+            }
+            SendState::Expired => {
+                info!("withdrawal {id}: {txid} expired unmined; building a new transaction");
+                sends.execute("DELETE FROM sends WHERE id = ?1", [id])?;
+            }
+        }
     }
 
     let usk = cfg.usk()?;
@@ -284,12 +328,28 @@ async fn send(cfg: &PayerConfig, id: &str, ua: &str, zat: u64) -> anyhow::Result
     tx.write(&mut raw)?;
     sends.execute("INSERT INTO sends (id, txid, raw) VALUES (?1, ?2, ?3)", rusqlite::params![id, txid.to_string(), raw])?;
     broadcast(&mut client, raw).await?;
-    Ok(txid.to_string())
+    Ok((txid.to_string(), 0))
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_stored_send_is_mined_pending_or_expired() {
+        assert_eq!(send_state(Some(100), Some(140), Some(102)), SendState::Mined(3));
+        assert_eq!(send_state(Some(100), Some(140), Some(100)), SendState::Mined(1));
+        // Mined wins even past expiry (it was mined in time).
+        assert_eq!(send_state(Some(100), Some(140), Some(500)), SendState::Mined(401));
+        assert_eq!(send_state(None, Some(140), Some(120)), SendState::Pending);
+        // Past expiry but inside the reorg margin: still only re-broadcast.
+        assert_eq!(send_state(None, Some(140), Some(150)), SendState::Pending);
+        assert_eq!(send_state(None, Some(140), Some(151)), SendState::Expired);
+        // Expiry 0 never expires; unknown expiry or tip is never treated as expired.
+        assert_eq!(send_state(None, Some(0), Some(10_000)), SendState::Pending);
+        assert_eq!(send_state(None, None, Some(10_000)), SendState::Pending);
+        assert_eq!(send_state(None, Some(140), None), SendState::Pending);
+    }
 
     #[test]
     fn recipients_must_carry_an_orchard_receiver() {
