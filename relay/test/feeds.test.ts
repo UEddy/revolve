@@ -94,7 +94,7 @@ test("feeds use one fixed upstream, cache it, and serve the last good copy when 
     const first = await (await get()).json();
     assert.equal(first.items[0].title, "Dream vs. Valkyries");
     assert.equal(f.calls.length, 1);
-    assert.match(f.calls[0]!.url, /^https:\/\/gamma-api\.polymarket\.com\/events\?active=true&closed=false&order=volume24hr&ascending=false&limit=30$/);
+    assert.match(f.calls[0]!.url, /^https:\/\/gamma-api\.polymarket\.com\/events\?active=true&closed=false&order=volume24hr&ascending=false&limit=5&offset=0$/);
     await get();
     assert.equal(f.calls.length, 1, "second read comes from the cache");
     // Expire the cache, then let the upstream fail: the stale copy is served.
@@ -104,6 +104,42 @@ test("feeds use one fixed upstream, cache it, and serve the last good copy when 
     assert.equal(stale.status, 200);
     assert.equal(stale.headers.get("x-revolve-stale"), "1");
     assert.equal((await stale.json()).items[0].title, "Dream vs. Valkyries");
+  } finally {
+    f.restore();
+  }
+});
+
+test("polymarket is read in small pages until there are 12 cards; a page too big or failing is skipped", async () => {
+  const events = (from: number, n: number) =>
+    Array.from({ length: n }, (_, i) => ({ ...game, id: String(from + i), title: `Event ${from + i}` }));
+  const f = stub((url) => {
+    const offset = Number(new URL(url).searchParams.get("offset"));
+    // 5 MB: over the relay's cap for one reply, as a real 30-event page was.
+    if (offset === 5) return new Response("[" + " ".repeat(5 * 1024 * 1024) + "]");
+    if (offset === 10) return new Response("busy", { status: 500 });
+    return Response.json(events(offset, 5));
+  });
+  try {
+    const res = await handleFeed(new Request("https://relay.test/feeds/markets"), {}, newState(), "markets");
+    assert.equal(res.status, 200);
+    const body = await res.json();
+    assert.deepEqual(
+      body.items.map((e: { id: string }) => e.id),
+      ["0", "1", "2", "3", "4", "15", "16", "17", "18", "19", "20", "21"],
+      "pages 0, 15 and 20 used; 5 (too big) and 10 (failed) skipped",
+    );
+    assert.equal(f.calls.length, 5, "stops once there are enough cards");
+  } finally {
+    f.restore();
+  }
+});
+
+test("polymarket feed fails only when every page does", async () => {
+  const f = stub(() => new Response("down", { status: 503 }));
+  try {
+    const res = await handleFeed(new Request("https://relay.test/feeds/markets"), {}, newState(), "markets");
+    assert.equal(res.status, 502);
+    assert.equal(f.calls.length, 6);
   } finally {
     f.restore();
   }
