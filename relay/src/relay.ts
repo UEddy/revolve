@@ -10,7 +10,7 @@
 
 import { lookup } from "node:dns/promises";
 import { isIP } from "node:net";
-import { nftList, projectNft, projectOpenSea, projectPolymarket, type NftCollection, type NftEntry } from "./feeds.ts";
+import { nftList, projectNft, projectOpenSea, projectPolymarket, type MarketEvent, type NftCollection, type NftEntry } from "./feeds.ts";
 
 export type RelayEnv = {
   APP_ORIGIN?: string;
@@ -28,7 +28,16 @@ export type RelayEnv = {
 };
 
 // Read-only Discover feeds: one fixed upstream each, never shaped by the client.
-const POLYMARKET_EVENTS = "https://gamma-api.polymarket.com/events?active=true&closed=false&order=volume24hr&ascending=false&limit=30";
+const POLYMARKET_EVENTS = "https://gamma-api.polymarket.com/events?active=true&closed=false&order=volume24hr&ascending=false";
+/**
+ * Polymarket is read in small pages: one reply for 30 events has passed 7 MB
+ * (some events carry hundreds of markets), over MAX_FEED_BODY. Pages are read
+ * in order until there are enough cards; a page that fails or is too big is
+ * skipped, and the feed fails only when every page does.
+ */
+const POLYMARKET_PAGE = 5;
+const POLYMARKET_PAGES = 6;
+const MARKET_CARDS = 12;
 const MAGIC_EDEN = "https://api-mainnet.magiceden.dev/v2/collections";
 /** Well-known collections. Magic Eden's ranked "popular" endpoint returns nothing, and its plain list is newest-first and unvetted. */
 export const DEFAULT_NFTS: readonly NftEntry[] = [
@@ -394,6 +403,26 @@ async function upstreamJson(url: string, headers: Record<string, string> = {}): 
   return JSON.parse(new TextDecoder().decode(body));
 }
 
+/** The top Polymarket events by 24 h volume, as cards, read page by page (see POLYMARKET_PAGE). */
+async function polymarketCards(): Promise<MarketEvent[]> {
+  const cards: MarketEvent[] = [];
+  let read = 0;
+  for (let page = 0; page < POLYMARKET_PAGES && cards.length < MARKET_CARDS; page++) {
+    let body: unknown;
+    try {
+      body = await upstreamJson(`${POLYMARKET_EVENTS}&limit=${POLYMARKET_PAGE}&offset=${page * POLYMARKET_PAGE}`);
+    } catch {
+      continue;
+    }
+    read++;
+    for (const c of projectPolymarket(body)) if (!cards.some((x) => x.id === c.id)) cards.push(c);
+    // A short page is the last one.
+    if (!Array.isArray(body) || body.length < POLYMARKET_PAGE) break;
+  }
+  if (read === 0) throw new Error("every Polymarket page failed");
+  return cards.slice(0, MARKET_CARDS);
+}
+
 /** Collection metadata (name, image): best effort, cached a day; after a failure not retried for an hour. */
 async function nftMeta(state: RelayState, key: string, url: string, headers: Record<string, string> = {}): Promise<unknown> {
   const hit = state.cache.get(key);
@@ -449,7 +478,7 @@ export function handleFeed(req: Request, env: RelayEnv, state: RelayState, which
       return out;
     });
   }
-  if (which === "markets") return feed(state, "feed:markets", FEED_TTL.markets, async () => projectPolymarket(await upstreamJson(POLYMARKET_EVENTS)));
+  if (which === "markets") return feed(state, "feed:markets", FEED_TTL.markets, polymarketCards);
   return feed(state, "feed:nfts", FEED_TTL.nfts, async () => {
     const out: NftCollection[] = [];
     // One collection at a time, so a refresh stays far below Magic Eden's per-minute limit.
