@@ -493,6 +493,8 @@ export class OrderBook {
     this.db.exec("BEGIN");
     try {
       if (row.note_key) this.db.prepare("INSERT OR IGNORE INTO settled_notes VALUES (?)").run(hash(row.note_key));
+      // The wallet paid, for the cash-in rule (public on chain anyway); the order itself goes.
+      if (row.burner) this.funds.addFunding(chainOf(row), row.burner, BigInt(row.payout_lamports));
       this.db.prepare("DELETE FROM orders WHERE order_id = ?").run(orderId);
       this.bump("paid_out");
       this.bump(`paid_out_zat_${row.bucket_zat}`);

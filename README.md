@@ -60,7 +60,7 @@ Instead of one Zodl payment per buy, you can fund Revolve once (0.002 to 0.05 ZE
 
 Getting back to shielded ZEC is where privacy usually breaks, so the default exit avoids both trails a swap leaves:
 
-1. **Cash in.** The position's SOL (or ETH on Base) goes back to Revolve's hot wallet, the same one every user's payouts come from. The transfer names its cash-in (a memo on Solana, input data on Base), so nobody else can claim it. The app reports it; the worker looks it up on chain itself (it succeeded, names this cash-in, paid at least the quoted amount, inside the quote's window, never used before) and only then signs credits for it, blind, exactly as for a ZEC funding.
+1. **Cash in.** The position's SOL (or ETH on Base) goes back to Revolve's hot wallet, the same one every user's payouts come from. Only wallets Revolve paid into can do this (see [Abuse protections](#abuse-protections)). The transfer names its cash-in (a memo on Solana, input data on Base), so nobody else can claim it. The app reports it; the worker looks it up on chain itself (it succeeded, names this cash-in, paid at least the quoted amount, inside the quote's window, never used before) and only then signs credits for it, blind, exactly as for a ZEC funding.
 2. **Gradually, if you choose.** The cash-out is split into 3 to 6 parts of random sizes, sent at random times over 2 to 8 hours, so neither the amounts nor the times line up with the sale, or with each other.
 3. **Withdraw.** Later, you spend credits to a shielded address (a unified address with an Orchard receiver; transparent addresses are refused). The worker pays after a random 20 to 120 minutes, one withdrawal at a time, from a separate ZEC hot wallet, and deletes the address once the payment is mined.
 
@@ -91,7 +91,7 @@ Why a ZEC hot wallet is on the server now, and why it's acceptable:
 - **A fresh wallet per position.** Every buy lands in its own new wallet, funded by the shared payout wallet like every other Revolve user's. Its key is 32 bytes drawn at random on the phone (`crypto.getRandomValues`), never derived from the passkey, a seed or another position, so two phones, or two positions on one phone, can't end up with the same wallet (the odds are about 1 in 2^256).
 - **Keys sealed by your passkey.** The passkey doesn't make the wallets, it locks them: the vault is AES-256-GCM encrypted with a key derived (HKDF-SHA256) from the passkey's WebAuthn PRF output. That output comes from a secret each passkey creates for itself when it is made, so every passkey opens only its own vault, even though the PRF input is the same public constant for everyone. No password, no seed phrase, no copy on any server.
 - **No accounts, no IP logs.** Orders hold no IP, user agent or creation time. The relay and worker don't log requests, and the reverse proxy has access logs off.
-- **Mappings deleted after payout.** Once an order is paid, its row is deleted; only a hash of the note remains, so a re-emitted note isn't paid twice.
+- **Mappings deleted after payout.** Once an order is paid, its row is deleted; only a hash of the note remains, so a re-emitted note isn't paid twice, and a hash of the wallet paid with the amount, which is public on chain anyway, for the cash-in rule. Nothing links that wallet back to the note or the order.
 - **Staggered balance checks.** The phone checks one wallet at a time, with gaps between them, so the RPC never sees all your wallets at once.
 - **A 0.001 ZEC grid.** Amounts are multiples of 0.001 ZEC, so there are many identical payments to hide among.
 - **A privacy coach.** Each position shows a linkability score with its reasons, and risky moves get a warning first: launch sniping, tiny holder counts, repeat buys, sending to another of your wallets or to a reused address, spending credits right after funding, cashing out right after buying or all at once.
@@ -128,11 +128,12 @@ How Revolve keeps people from gaming it, and what is still open:
 - **Hot wallets are bounded.** Small balances, a cap on each wallet and daily payout caps (Solana, Base, withdrawals). The deposit address's spending key isn't on the server, and withdrawals go one at a time after a random 20 to 120 minutes.
 - **Nothing pays twice.** Spent credits are remembered by hash forever, every payout is stored before it is broadcast and settled by looking it up, and a cash-in transaction can fund only once.
 - **A clone can't open your vault.** Passkeys only work on the real site, and the app runs only its own code and talks only to the servers it lists.
+- **Revolve only takes back coins it handed out.** A cash-in must come from a wallet Revolve paid into, and a wallet can send back at most twice what Revolve paid it (`CASHIN_MAX_MULTIPLE`), which leaves room for real trading gains. Anything else is held for review and refunded to the wallet it came from. So outside money, stolen funds for example, can't be turned into credits and withdrawn as private ZEC. Revolve keeps a hash of each payout's wallet with the amounts paid in and sent back, which are public on chain anyway; no order or Zcash detail goes with them.
 - **Rate limits** on the order API and the relay, which forwards allowlisted calls only.
 
 Not covered yet:
 
-- Cash-ins are accepted from any wallet, not only ones Revolve funded, so the caps (0.05 ZEC per part, the daily withdrawal cap) are what bound misuse of that path.
+- Within that 2× allowance, gains can't be told apart from money moved in through a rigged trade: someone could launder up to what they first bought through Revolve, with real shielded ZEC. The caps (0.05 ZEC per part, the daily withdrawal cap) bound it.
 - The rate limits are global, by design: Revolve keeps no per-user state, so a flood of requests slows everyone down rather than one client.
 - The code and hosting accounts (GitHub, Vercel, DigitalOcean) are only as safe as their logins: two-factor authentication on all of them is part of running Revolve.
 

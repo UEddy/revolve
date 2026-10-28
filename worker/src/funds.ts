@@ -26,6 +26,10 @@ interface FundRow {
   pay_amount: string | null;
 }
 
+/** A wallet's key in funded_wallets: SHA-256 of its chain and address (EVM addresses lowercased). */
+export const walletKey = (chain: string, address: string) =>
+  createHash("sha256").update(`${chain}|${chain === "solana" ? address : address.toLowerCase()}`).digest("hex");
+
 /** A cash-in's quote, as POST /cashins/:id/sent checks a transaction against it. */
 export type CashinQuote = { status: FundStatus; source: string; payAmount: bigint; expiresAt: number; amountZat: bigint };
 
@@ -166,16 +170,45 @@ export class FundBook {
     }
   }
 
+  /** What Revolve paid into a wallet and what came back from it; null if Revolve never paid it, as far as it knows. */
+  fundedWallet(chain: string, address: string): { paidIn: bigint; returned: bigint } | null {
+    const r = this.db.prepare("SELECT paid_in, returned FROM funded_wallets WHERE wallet_hash = ?").get(walletKey(chain, address)) as
+      | { paid_in: string; returned: string }
+      | undefined;
+    return r ? { paidIn: BigInt(r.paid_in), returned: BigInt(r.returned) } : null;
+  }
+
+  /** Records a payout into a wallet (run inside the payout's own transaction). */
+  addFunding(chain: string, address: string, amount: bigint): void {
+    const w = this.fundedWallet(chain, address);
+    this.db
+      .prepare("INSERT OR REPLACE INTO funded_wallets (wallet_hash, paid_in, returned) VALUES (?, ?, ?)")
+      .run(walletKey(chain, address), ((w?.paidIn ?? 0n) + amount).toString(), (w?.returned ?? 0n).toString());
+  }
+
   /**
    * Funds a cash-in with a verified transaction, once: false when that
    * transaction was already used, or the cash-in is no longer awaiting payment.
+   * With `from`, the transfer must come from a wallet Revolve paid into, and all
+   * it has sent back must stay within `maxMultiple` times what it was paid
+   * (`outside_funds` otherwise): Revolve only takes back what it handed out,
+   * with room for real gains, so outside money can't be turned into credits.
    */
-  fundCashin(fundId: string, txHash: string): "funded" | "tx_used" | "not_awaiting" {
+  fundCashin(
+    fundId: string,
+    txHash: string,
+    from?: { chain: string; address: string; amount: bigint; maxMultiple: number },
+  ): "funded" | "tx_used" | "not_awaiting" | "outside_funds" {
     this.db.exec("BEGIN IMMEDIATE");
     try {
       if (this.db.prepare("SELECT 1 FROM used_cashin_txs WHERE tx_hash = ?").get(txHash)) {
         this.db.exec("ROLLBACK");
         return "tx_used";
+      }
+      const w = from ? this.fundedWallet(from.chain, from.address) : null;
+      if (from && (!w || w.returned + from.amount > w.paidIn * BigInt(from.maxMultiple))) {
+        this.db.exec("ROLLBACK");
+        return "outside_funds";
       }
       const r = this.db.prepare("UPDATE fund_orders SET status = 'funded', confirmations = ? WHERE fund_id = ? AND source IS NOT NULL AND status = 'awaiting_payment'").run(REQUIRED_CONFS, fundId);
       if (Number(r.changes) !== 1) {
@@ -183,6 +216,11 @@ export class FundBook {
         return "not_awaiting";
       }
       this.db.prepare("INSERT INTO used_cashin_txs VALUES (?)").run(txHash);
+      if (from && w) {
+        this.db
+          .prepare("UPDATE funded_wallets SET returned = ? WHERE wallet_hash = ?")
+          .run((w.returned + from.amount).toString(), walletKey(from.chain, from.address));
+      }
       this.db.exec("COMMIT");
       return "funded";
     } catch (e) {
