@@ -44,16 +44,25 @@ function useBaseToken(address: string) {
 }
 
 export function BaseScreen() {
+  return (
+    <div className="screen">
+      <TopBar title="Buy on Base" />
+      <BaseList />
+    </div>
+  );
+}
+
+/** The Base tokens and a field for any token's address: the Base screen and Discover's Base chip. */
+export function BaseList() {
   const [text, setText] = useState("");
   const pasted = text.trim();
   const valid = isEvmAddress(pasted);
   return (
-    <div className="screen">
-      <TopBar title="Buy on Base" />
-      <p className="muted" style={{ marginTop: 0 }}>
+    <>
+      <p className="muted small" style={{ margin: "0 2px 12px" }}>
         Paid in shielded ZEC like everything else. Each buy lands in a fresh Base wallet of its own, holding that one token and a little ETH for gas.
       </p>
-      <div className="card flat" style={{ padding: 0 }}>
+      <div className="list">
         {BASE_TOKENS.map((t) => (
           <a key={t.mint} className="trow" href={href.baseToken(t.mint)}>
             <TokenIcon symbol={t.symbol} />
@@ -79,7 +88,7 @@ export function BaseScreen() {
       <button className="btn ghost" disabled={!valid} onClick={() => go(href.baseToken(checksummed(pasted)))}>
         Look it up
       </button>
-    </div>
+    </>
   );
 }
 
