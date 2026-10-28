@@ -106,7 +106,7 @@ Why a ZEC hot wallet is on the server now, and why it's acceptable:
 
 Stated plainly, so nobody has to dig for them:
 
-- **Custodial between deposit and payout.** From the moment your ZEC arrives until the SOL is paid out, Revolve holds the value.
+- **Custodial between deposit and payout.** From the moment your ZEC arrives until the SOL is paid out, Revolve holds the value. [Path to trustless](#path-to-trustless) is how that goes away.
 - **Credits are custodial until spent or withdrawn.** That's capped at 0.05 ZEC per funding or cash-in part. Losing your phone without a vault backup loses them.
 - **Withdrawals come from a hot wallet.** A ZEC spending key for that one wallet is on the server; its balance and a daily cap bound the loss. If it runs low, withdrawals wait (your credits stay yours) until it's topped up.
 - **Cash-in transfers are public.** Anyone can see a fresh wallet pay Revolve's hot wallet. What they can't see is where the credits went; timing and amounts are the remaining fingerprint, which is what the gradual mode and the coach are for.
@@ -258,8 +258,62 @@ Revolve’s core stays the same for everything below: you pay in shielded ZEC, e
 - Lending and borrowing. Supply assets or borrow against them from a fresh wallet, with collateral that can’t be linked to your other positions.
 - More chains as payout routes. Base is built (above); Robinhood Chain is next on the same rules (API_CONTRACT.md v1.4), each a new route behind the same deposit, not a new user flow.
 - Fully non-custodial in-app wallet, once a browser Zcash library supports Ironwood (none does yet; we checked).
+- Trustless swaps, so Revolve never holds your money at any point: see [Path to trustless](#path-to-trustless) below.
 
 Long-lived positions like staking, lending and perps are easier to watch over time than one-off buys, so the privacy coach will extend to them: warnings on reusing a wallet across positions, topping up from a known wallet, or closing everything at once.
+
+
+### Path to trustless
+
+Today Revolve is custodial at three points (see [Trust boundaries](#trust-boundaries)): it holds your ZEC between deposit and payout, it holds the ZEC behind credits until they're spent or withdrawn, and its hot wallets pay out. You trust Revolve not to keep the money and not to get hacked. The plan is to replace that trust with **atomic swaps**: the ZEC and the coin on the other chain change hands together or not at all, so neither Revolve nor anyone else can keep both.
+
+**Why Zcash needs a special approach.** Atomic swaps on Bitcoin lock coins with a script: "pay whoever reveals this secret, or refund after this time". Zcash's shielded pool has no scripts and no time locks, and moving through Zcash's transparent pool to get them would deshield the payment, which is exactly the leak Revolve exists to avoid. Monero has the same limit, and Monero–Bitcoin swaps solved it in a way that maps directly onto Revolve:
+
+- **The Zcash side is just a key, split in two.** The phone and a solver (Revolve, or anyone running one) each create half of a fresh shielded spending key. Together the halves make a one-off shielded address that only someone holding *both* halves can spend from.
+- **All the rules live on the other chain.** A small escrow program on Solana (a contract on Base) holds the conditions and the deadlines.
+- **A proof ties the two together.** Each side proves that its half is the same secret number as a key the other chain can check (a cross-curve discrete-log equality proof, the technique Monero–Bitcoin swaps use). Revealing a half on Solana therefore hands over the matching half of the Zcash key.
+
+**A trustless buy, step by step:**
+
+1. **Quote and set-up.** The phone and the solver exchange their key halves' public parts and the proofs. The phone works out the one-off shielded address.
+2. **The solver locks the SOL first.** It goes into the escrow, earmarked for your fresh wallet, with a little SOL sent straight to that wallet so it can pay for its own claim.
+3. **You pay from Zodl.** A normal shielded payment to the one-off address: no memo, no changes to Zodl, nothing public on Zcash.
+4. **The solver releases.** It can see the payment (both halves can view the address), waits for confirmations, and signs a release for your fresh wallet.
+5. **You claim the SOL.** Claiming publishes your half of the key on Solana; the solver now holds both halves and sweeps the ZEC. The buy then runs on the phone exactly as it does today.
+
+If anything goes wrong, nobody can take both sides:
+
+| What goes wrong | What happens |
+|---|---|
+| You never pay | After a deadline the solver takes its SOL back. It loses only time |
+| The solver never releases | The solver can only get its SOL back by refunding, and refunding reveals *its* half of the key, so you sweep your ZEC back |
+| The solver never refunds either | After a second, later deadline, you take the SOL anyway |
+
+**A trustless exit** is the same swap in reverse: your fresh wallet locks its SOL in the escrow, the solver pays ZEC to a one-off shielded address you share with it, you release, the solver claims the SOL and reveals its half, and your phone sweeps the ZEC to your Zodl address whenever it likes. Your Zcash address is never given to anyone, not even the solver: the same protection blind credits give today, without anyone holding your money.
+
+**What it replaces in today's design:**
+
+| Part | Today | Trustless |
+|---|---|---|
+| Deposit | One shared shielded address, matched by memo | A one-off shielded address per swap, no memo |
+| Worker | Custodian: payouts from hot wallets, the credits mint, the withdrawal queue | A solver: quotes, locks coins in escrow, releases, sweeps ZEC. Credits stay only as an opt-in, clearly custodial fast lane |
+| Hot wallets | Pay out and hold your value in between | Hold the solver's own float only; your money is never in them |
+| New: escrow programs | None | On Solana and Base, audited and made immutable (an upgrade key would bring the trust back) |
+| Rust watcher | View-only deposit watcher, withdrawal payer | Split-key tooling, sweeps, the proofs |
+| App | Vault, fresh wallets, credits | Adds the swap client (key half, proofs, watching the escrow, claiming) and a small shielded wallet for exits and refunds |
+| Who can be a solver | Revolve only | Anyone; the app takes the best quote |
+
+**What stays, honestly:** the solver still sees the amount, the timing, the fresh wallet and your IP, as Revolve does today; it just can't keep your money or follow your ZEC after the swap. Your phone has to be online during the swap window. And "fund once, then buy with a tap" is custodial by nature, so it would remain an opt-in.
+
+**What's built today, and what's planned:**
+
+- **Built, and reused as is:** the fresh wallet per position, the passkey vault, on-device buys and sells, the Zcash tooling (librustzcash, synced to the Ironwood pool), crash-safe payouts that never pay twice, and Solana and Base on the same rules. The swap itself is **not built yet**.
+- **Planned, in this order:**
+  1. **Trust-minimised first:** split the hot-wallet keys across independent people (FROST threshold signing, which already supports Zcash's shielded keys), publish a proof of reserves for credits, and ship reproducible app builds pinned by hash.
+  2. **Trustless buys:** the escrow programs, the split-key spends and the cross-curve proof, with an audit before any real money. Buys come first because Zodl does the paying, so the phone only needs to work out the address and claim.
+  3. **Trustless exits:** they need a shielded Zcash wallet inside the app, so they wait for a browser library that supports Ironwood (none does yet).
+
+This is careful cryptography that has to be right before it holds anyone's money, so it ships after the hackathon, with an audit, not before.
 
 ---
 
