@@ -22,7 +22,11 @@ for (const sig of ["SIGINT", "SIGTERM"] as const) process.once(sig, () => proces
 const cfg = loadConfig();
 const book = new OrderBook(openDb(cfg.dbPath));
 const payer = new Payer(cfg.solanaRpcUrl, cfg.solanaKeypairPath);
-const pricing = new Pricing({ ...cfg, weiPerZec: cfg.base.weiPerZec, gasAllowanceWei: cfg.base.gasAllowanceWei });
+const pricing = new Pricing({ ...cfg, weiPerZec: cfg.base.weiPerZec });
+// Payouts no longer add gas money on top: say so if an old env file still sets it.
+for (const k of ["SWAP_FEE_LAMPORTS", "BASE_GAS_ALLOWANCE_WEI"]) {
+  if (process.env[k]) console.error(`${k} is no longer used: a fresh wallet's gas comes out of its own payout`);
+}
 pricing.start();
 const mint = await startMint(cfg.mintKeyPath, cfg.mintKeyId);
 // Base is optional: without a usable EVM key the worker runs Solana only, as before.
@@ -102,6 +106,7 @@ createApi({
   maxOpenOrders: cfg.maxOpenOrders,
   quote: (zat, chain) => (chain === "solana" ? pricing.payoutLamports(zat) : pricing.payoutWei(zat)),
   usdPerZec: () => pricing.indicativeUsdPerZec(),
+  spreadBps: pricing.spreadBps,
   mint,
   chains: basePayer ? ["solana", "base"] : ["solana"],
   cashin: {

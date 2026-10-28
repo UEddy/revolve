@@ -29,6 +29,7 @@ Response 200:
 ```
 - `max_zec` below `min_zec` means no orders can be placed right now; the app shows "temporarily unavailable".
 - `indicative_usd_per_zec` is for display only (USD input and labels). It comes from the same 60 second price timer the worker already runs. Payouts are always computed from the quote in POST /orders, never from this field.
+- `spread_bps` (added later in v1.5) is the spread taken from every payout, in basis points (150 = 1.5%), so the app's "you get" estimate matches the quote. Estimates only; an app talking to a worker without it assumes 150.
 - Response 503 `{"error":"not_ready"}` until price and balance are loaded. The app treats it as loading and retries every 3 to 5 seconds.
 
 ## GET /buckets (deprecated)
@@ -93,7 +94,7 @@ A payment that still arrives for a cancelled order is held for manual review (`p
 
 - Match on memo `order_id` AND the order's exact `amount_zec`. Anything else goes to `needs_review`.
 - 3 confirmations, then a random 2 to 6 extra blocks, then pay.
-- Payout = quoted lamports, which include enough SOL for the user's Jupiter swap fees.
+- Payout = quoted lamports: the amount's value at the market rate, less the spread. Nothing is added for gas; the app keeps a little of the payout in the fresh wallet for its swap and a later sale.
 - No request logging with IPs. CORS restricted to the app origin.
 
 ## v1.4: payout chains (Solana, Base)
@@ -152,7 +153,7 @@ Adds `chain`. For Base, `payout_signature` holds the transaction hash (`0x` + 64
 ### Rules for the worker (v1.4)
 
 - One EVM hot-wallet key, stored outside the repo under the same rules as the mint key (`keypath.ts`). Base has its own balance, inventory, reserve, hot-wallet cap and daily payout cap. Its RPC URL comes from env.
-- Base payout = native ETH for the quoted buy plus a gas allowance, so the fresh wallet can pay its own swap gas (and a later sale). Plain transfer, EIP-1559, 21,000 gas.
+- Base payout = native ETH for the quoted buy, less the spread, nothing added: the app keeps a little of it in the fresh wallet for its own swap gas (and a later sale). Plain transfer, EIP-1559, 21,000 gas.
 - Crash-safe and never paying twice, like Solana:
   - At most one Base payout is in flight. The worker signs the transfer with the next nonce and stores the signed raw transaction, its hash and its nonce, conditionally (only if the order is still `confirmed`), before broadcasting.
   - On an unknown outcome it re-broadcasts that same signed transaction, which can't pay twice because the nonce can only be used once. It then looks up the receipt.

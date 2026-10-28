@@ -13,6 +13,8 @@ import type { CreditToken, Credits, Funding } from "./model.ts";
 export const CREDIT_ZATS = 100_000n; // 0.001 ZEC
 export const FUND_MIN_ZATS = 200_000n; // 0.002 ZEC
 export const FUND_MAX_ZATS = 5_000_000n; // 0.05 ZEC, the per-funding custody cap
+/** Taken out of every withdrawal for its network fee (CREDITS_CONTRACT.md v1.5): 1 credit withdraws 0.0009 ZEC. */
+export const WITHDRAW_FEE_ZATS = 10_000n;
 const MSG_BYTES = 32;
 
 const suite = () => RSABSSA.SHA384.PSS.Randomized();

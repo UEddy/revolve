@@ -101,7 +101,7 @@ Underpaid or late transfers are never minted automatically; they are refunded by
 
 ### POST /withdrawals
 
-Request: `{ "tokens": [{ "msg": "...", "sig": "..." }, ...], "address": "u1..." }`. The address must be a mainnet unified address with an Orchard receiver; transparent and Sapling-only addresses are refused, so a withdrawal is always fully shielded. The amount is exactly `tokens × 0.001` ZEC; Revolve pays the network fee. Response 201: `{ "withdrawal_id": "rw_...", "amount_zec": "0.007", "status": "queued" }`.
+Request: `{ "tokens": [{ "msg": "...", "sig": "..." }, ...], "address": "u1..." }`. The address must be a mainnet unified address with an Orchard receiver; transparent and Sapling-only addresses are refused, so a withdrawal is always fully shielded. The amount is `tokens × 0.001` ZEC less a flat 0.0001 ZEC network fee, which comes out of it as with any wallet (1 credit withdraws 0.0009 ZEC). Response 201: `{ "withdrawal_id": "rw_...", "amount_zec": "0.0069", "status": "queued" }` for 7 credits.
 - Same checks as a spend: every signature verified first; spent check, spend record and withdrawal row in one transaction; an exact retry (same tokens and address) returns the same withdrawal.
 - 400 `invalid_tokens`, 400 `invalid_address`, 409 `token_spent`, 503 `withdraw_unavailable` (no ZEC hot wallet, or it can't cover this right now). Nothing is spent on any error.
 

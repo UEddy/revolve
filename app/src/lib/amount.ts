@@ -11,7 +11,16 @@ export type Limits = {
   max: bigint; // below `min` means no orders can be placed right now
   step: bigint;
   usdPerZec: bigint; // indicative, in USD x 1e8 per ZEC
+  spreadBps: number; // taken from every payout; for estimates only, the quote is binding
 };
+
+/** A worker that doesn't say (before v1.5's spread_bps) uses the default spread. */
+const DEFAULT_SPREAD_BPS = 150;
+
+/** A value after Revolve's spread: what a payout is worth, for estimates. */
+export function afterSpread(value: number, limits: Limits): number {
+  return (value * (10_000 - limits.spreadBps)) / 10_000;
+}
 
 /** A decimal string with up to `places` fraction digits, scaled to an integer. Accepts "," as the decimal mark. */
 export function parseScaled(text: string, places: number): bigint | null {
@@ -68,7 +77,7 @@ export function checkAmount(text: string, unit: Unit, limits: Limits): AmountChe
   return { kind: "ok", zats, rounded: zats !== raw };
 }
 
-type LimitsBody = { min_zec?: unknown; max_zec?: unknown; step_zec?: unknown; indicative_usd_per_zec?: unknown; chains?: Record<string, { min_zec?: unknown; max_zec?: unknown; step_zec?: unknown } | undefined> };
+type LimitsBody = { min_zec?: unknown; max_zec?: unknown; step_zec?: unknown; indicative_usd_per_zec?: unknown; spread_bps?: unknown; chains?: Record<string, { min_zec?: unknown; max_zec?: unknown; step_zec?: unknown } | undefined> };
 
 /**
  * Parses GET /limits for one chain. The top level is Solana; another chain's
@@ -90,6 +99,10 @@ export function parseLimits(body: LimitsBody, chain: "solana" | "base" = "solana
     max: dec(body.max_zec, "max_zec"),
     step: dec(body.step_zec, "step_zec"),
     usdPerZec: dec(body.indicative_usd_per_zec, "indicative_usd_per_zec"),
+    spreadBps:
+      typeof body.spread_bps === "number" && Number.isInteger(body.spread_bps) && body.spread_bps >= 0 && body.spread_bps < 10_000
+        ? body.spread_bps
+        : DEFAULT_SPREAD_BPS,
   };
   if (limits.step <= 0n || limits.min <= 0n) throw new Error("limits: step and min must be positive");
   return limits;

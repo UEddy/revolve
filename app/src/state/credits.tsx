@@ -11,7 +11,7 @@ import { newEvmBurner, ethBalance, sendTx, transferFee, UnconfirmedEvm } from ".
 import { random } from "../lib/bytes.ts";
 import { MOCK } from "../lib/config.ts";
 import { formatZec, parseZec } from "../lib/amount.ts";
-import { afterSignError, balanceCredits, blindFor, creditsFor, importMintKey, keyFingerprint, tokensAfter, unblindAll } from "../lib/credits.ts";
+import { WITHDRAW_FEE_ZATS, afterSignError, balanceCredits, blindFor, creditsFor, importMintKey, keyFingerprint, tokensAfter, unblindAll } from "../lib/credits.ts";
 import { cancelFunding, cashinRates, createCashin, createFunding, getFunding, getMintKey, getWithdrawal, reportCashin, signFunding, spend, withdraw, type MintKey } from "../lib/mint.ts";
 import { creditsAffordable, keepFor, MAX_PART_CREDITS, planParts } from "../lib/exit.ts";
 import { lamports } from "../lib/solana.ts";
@@ -469,7 +469,7 @@ export function CreditsProvider({ children }: { children: ReactNode }) {
       await update((d) => {
         const c = creditsOf(d);
         if (c.tokens.length < n) throw new SpendRefused("Not enough credits for this amount.");
-        (c.withdrawals ??= []).unshift({ key: wkey, amountZec: formatZec(BigInt(n) * 100_000n), address, createdAt: Date.now(), status: "sending", tokens: c.tokens.splice(0, n) });
+        (c.withdrawals ??= []).unshift({ key: wkey, amountZec: formatZec(BigInt(n) * 100_000n - WITHDRAW_FEE_ZATS), address, createdAt: Date.now(), status: "sending", tokens: c.tokens.splice(0, n) });
       });
       const problem = await sendWithdrawal(wkey);
       const left = latest.current?.withdrawals?.find((x) => x.key === wkey);

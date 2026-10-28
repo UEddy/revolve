@@ -7,7 +7,7 @@ import { BASE_TOKENS, baseToken } from "../lib/basetokens.ts";
 import { baseUsdPrice } from "../lib/baseswap.ts";
 import { BASE_RESERVE_WEI, NATIVE_ETH, checksummed, isEvmAddress, tokenMeta } from "../lib/evm.ts";
 import { kyberRoute } from "../lib/kyber.ts";
-import { zecToUsd, type Limits } from "../lib/amount.ts";
+import { afterSpread, zecToUsd, type Limits } from "../lib/amount.ts";
 import { usdPrice } from "../lib/jupiter.ts";
 import { BASE_BUYING, ETH_MINT } from "../lib/config.ts";
 import { price, units } from "../lib/format.ts";
@@ -94,12 +94,12 @@ export function BaseList() {
   );
 }
 
-/** A rough "you get": the amount's value in ETH, less the gas reserve, quoted on KyberSwap. */
+/** A rough "you get": the amount's value in ETH after the spread, less the gas reserve, quoted on KyberSwap. */
 function baseEstimate(t: TokenRef) {
   return async (zats: bigint, limits: Limits): Promise<number | null> => {
     const eth = await usdPrice(ETH_MINT);
     if (!eth) return null;
-    const wei = BigInt(Math.floor((zecToUsd(zats, limits) / eth) * 1e9)) * 1_000_000_000n - BASE_RESERVE_WEI;
+    const wei = BigInt(Math.floor((afterSpread(zecToUsd(zats, limits), limits) / eth) * 1e9)) * 1_000_000_000n - BASE_RESERVE_WEI;
     if (wei <= 0n) return 0;
     return units((await kyberRoute(NATIVE_ETH, t.mint, wei)).amountOut, t.decimals);
   };
