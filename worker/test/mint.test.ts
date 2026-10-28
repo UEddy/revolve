@@ -65,7 +65,7 @@ async function withMintApi(
     state: { free: bigint | null; price: boolean };
     db: ReturnType<typeof openDb>;
   }) => Promise<void>,
-  opts: { mint?: Mint | null } = {},
+  opts: { mint?: Mint | null; chains?: ("solana" | "base")[] } = {},
 ) {
   const db = openDb(":memory:");
   const book = new OrderBook(db);
@@ -80,6 +80,7 @@ async function withMintApi(
     usdPerZec: () => "1224.50",
     freeInventory: () => state.free,
     mint: opts.mint === undefined ? mint : opts.mint,
+    chains: opts.chains,
     // Rate limits have their own test (hardening.test.ts); these tests make bursts of calls.
     limits: { write: new Bucket(1e9, 1e9), read: new Bucket(1e9, 1e9) },
   });
@@ -306,7 +307,7 @@ test("spend: 201, exact retry returns the same order, any other reuse is a doubl
     const ok = await json(base, "/orders", { amount_zec: "0.003", tokens: ts, burner });
     assert.equal(ok.status, 201);
     const order = (await ok.json()) as { order_id: string; payout_lamports: string };
-    assert.deepEqual(Object.keys(order).sort(), ["order_id", "payout_lamports"]);
+    assert.deepEqual(Object.keys(order).sort(), ["chain", "order_id", "payout_lamports"]);
     assert.equal(order.payout_lamports, "30000000");
     assert.equal(spent(), 3);
     assert.deepEqual(await (await fetch(`${base}/orders/${order.order_id}`)).json(), {
@@ -446,3 +447,37 @@ test("DELETE /mint/orders/:id cancels an unpaid funding; 409 once a payment is s
     assert.equal(book.funds.get(seen)!.status, "funded");
     assert.equal((await del(seen)).status, 409, "funded is past cancelling too");
   }));
+
+test("spend on Base: payout_wei to a checksummed address; bad chain, bad address or no Base wallet spend nothing", async () => {
+  const evm = "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913";
+  await withMintApi(
+    async ({ base, spent }) => {
+      const ts = await tokens(2);
+      for (const [body, code] of [
+        [{ chain: "tron", burner: evm }, "invalid_chain"],
+        [{ chain: "base", burner }, "invalid_burner"],
+        [{ chain: "base", burner: evm.toLowerCase() }, "invalid_burner"],
+      ] as const) {
+        const r = await json(base, "/orders", { amount_zec: "0.002", tokens: ts, ...body });
+        assert.equal(r.status, 400);
+        assert.deepEqual(await r.json(), { error: code });
+      }
+      assert.equal(spent(), 0);
+      const ok = await json(base, "/orders", { amount_zec: "0.002", tokens: ts, burner: evm, chain: "base" });
+      assert.equal(ok.status, 201);
+      const order = (await ok.json()) as Record<string, string>;
+      assert.deepEqual(Object.keys(order).sort(), ["chain", "order_id", "payout_wei"]);
+      assert.equal(order.chain, "base");
+      assert.equal(spent(), 2);
+      const retry = await json(base, "/orders", { amount_zec: "0.002", tokens: ts, burner: evm, chain: "base" });
+      assert.deepEqual(await retry.json(), order, "an exact retry finds the same order");
+    },
+    { chains: ["solana", "base"] },
+  );
+  await withMintApi(async ({ base, spent }) => {
+    const r = await json(base, "/orders", { amount_zec: "0.002", tokens: await tokens(2), burner: evm, chain: "base" });
+    assert.equal(r.status, 503);
+    assert.deepEqual(await r.json(), { error: "chain_unavailable" });
+    assert.equal(spent(), 0);
+  });
+});

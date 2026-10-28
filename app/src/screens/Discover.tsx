@@ -113,6 +113,13 @@ export function Discover() {
     <div className="screen">
       <h1 style={{ marginTop: 6 }}>Discover</h1>
       <DiscoverSection />
+      <a className="card flat row" href={href.base} style={{ margin: "14px 0", color: "inherit", textDecoration: "none" }}>
+        <div className="grow">
+          <b>Buy on Base</b>
+          <div className="faint small">Tokens on Coinbase's chain, each in a fresh Base wallet</div>
+        </div>
+        <span aria-hidden>›</span>
+      </a>
       <div className="search" style={{ position: "sticky" }}>
         <Search />
         <input

@@ -2,7 +2,7 @@ import { mock, test } from "node:test";
 import assert from "node:assert/strict";
 import { createServer } from "node:http";
 import type { AddressInfo } from "node:net";
-import { blockedHost, Bucket, createRelay, handleImg, handleJup, handleRpc, newState, privateAddress, readCapped, ResponseCache, type RelayState } from "../src/relay.ts";
+import { blockedHost, Bucket, createRelay, handleBaseRpc, handleImg, handleJup, handleKyber, handleRpc, newState, privateAddress, readCapped, ResponseCache, type RelayState } from "../src/relay.ts";
 
 /** Tests never touch real DNS: every name resolves to one public address. */
 function publicDns(s: RelayState, table: Record<string, string[]> = {}): RelayState {
@@ -232,6 +232,51 @@ test("bodies are read with a hard cap, declared or not, and never buffered past 
     const res = await handleImg(new Request(`https://relay.test/img?u=${encodeURIComponent("https://cdn.test/huge.png")}`), publicDns(newState()));
     assert.equal(res.status, 502);
     assert.deepEqual(await res.json(), { error: "image too large" });
+  } finally {
+    f.restore();
+  }
+});
+
+test("base rpc relay: allowlisted methods only, one call per request, nothing from the client", async () => {
+  const s = newState();
+  const req = (body: unknown) => new Request("https://relay.test/base-rpc", { method: "POST", body: JSON.stringify(body), headers: { "x-forwarded-for": "1.2.3.4" } });
+  assert.equal((await handleBaseRpc(req([{ jsonrpc: "2.0", method: "eth_getBalance" }]), {}, s)).status, 400);
+  for (const method of ["eth_getLogs", "eth_newFilter", "debug_traceTransaction", "eth_accounts", "eth_sign"]) {
+    assert.equal((await handleBaseRpc(req({ jsonrpc: "2.0", method }), {}, s)).status, 400, method);
+  }
+  const f = stubFetch(() => new Response('{"jsonrpc":"2.0","id":7,"result":"0x2105"}'));
+  try {
+    const r = await handleBaseRpc(req({ jsonrpc: "2.0", id: 7, method: "eth_chainId", params: [] }), { BASE_RPC_URL: "https://base.rpc.test" }, s);
+    assert.equal(r.status, 200);
+    assert.equal(f.calls[0]!.url, "https://base.rpc.test");
+    assert.deepEqual(JSON.parse(f.calls[0]!.body), { jsonrpc: "2.0", id: 7, method: "eth_chainId", params: [] });
+    assert.equal(f.calls[0]!.headers.get("x-forwarded-for"), null);
+  } finally {
+    f.restore();
+  }
+});
+
+test("kyber relay: route quotes pass only three validated parameters; build passes its body; nothing else", async () => {
+  const s = newState();
+  const eth = "0xEeeeeEeeeEeEeeEeEeEeeEEEeeeeEeeeeeeeEEeE";
+  const usdc = "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913";
+  const get = (q: string) => handleKyber(new Request(`https://relay.test/kyber?${q}`), {}, s);
+  assert.equal((await get("path=routes&tokenIn=nope&tokenOut=" + usdc + "&amountIn=1")).status, 400);
+  assert.equal((await get(`path=routes&tokenIn=${eth}&tokenOut=${usdc}&amountIn=0`)).status, 400);
+  assert.equal((await get("path=../../admin")).status, 404);
+  assert.equal((await handleKyber(new Request("https://relay.test/kyber?path=route/build"), {}, s)).status, 405);
+
+  const f = stubFetch(() => new Response('{"code":0,"data":{}}'));
+  try {
+    const r = await get(`path=routes&tokenIn=${eth}&tokenOut=${usdc}&amountIn=1000&source=me&clientIp=1.2.3.4`);
+    assert.equal(r.status, 200);
+    assert.equal(f.calls[0]!.url, `https://aggregator-api.kyberswap.com/base/api/v1/routes?tokenIn=${eth}&tokenOut=${usdc}&amountIn=1000`);
+    assert.equal(f.calls[0]!.headers.get("x-client-id"), "revolve");
+    const body = JSON.stringify({ routeSummary: {}, sender: usdc, recipient: usdc, slippageTolerance: 100 });
+    await handleKyber(new Request("https://relay.test/kyber?path=route/build", { method: "POST", body }), {}, s);
+    assert.equal(f.calls[1]!.url, "https://aggregator-api.kyberswap.com/base/api/v1/route/build");
+    assert.equal(f.calls[1]!.body, body);
+    assert.equal(r.headers.get("cache-control"), "no-store");
   } finally {
     f.restore();
   }

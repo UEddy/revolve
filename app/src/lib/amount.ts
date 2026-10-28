@@ -68,8 +68,18 @@ export function checkAmount(text: string, unit: Unit, limits: Limits): AmountChe
   return { kind: "ok", zats, rounded: zats !== raw };
 }
 
-/** Parses GET /limits. Throws on anything that is not a sane decimal string. */
-export function parseLimits(body: { min_zec?: unknown; max_zec?: unknown; step_zec?: unknown; indicative_usd_per_zec?: unknown }): Limits {
+type LimitsBody = { min_zec?: unknown; max_zec?: unknown; step_zec?: unknown; indicative_usd_per_zec?: unknown; chains?: Record<string, { min_zec?: unknown; max_zec?: unknown; step_zec?: unknown } | undefined> };
+
+/**
+ * Parses GET /limits for one chain. The top level is Solana; another chain's
+ * range comes from `chains` (v1.4), and a chain missing there is not offered
+ * right now: its max is 0, which reads as unavailable.
+ */
+export function parseLimits(body: LimitsBody, chain: "solana" | "base" = "solana"): Limits {
+  if (chain !== "solana") {
+    const c = body.chains?.[chain];
+    return parseLimits({ ...body, ...(c ?? { max_zec: "0" }) });
+  }
   const dec = (v: unknown, name: string) => {
     const n = typeof v === "string" ? parseZec(v) : null;
     if (n === null) throw new Error(`limits: bad ${name}`);

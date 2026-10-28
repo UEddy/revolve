@@ -4,7 +4,7 @@
 import { ORDER_API, ZEC_MINT } from "./config.ts";
 import { parseLimits, parseZec, type Limits } from "./amount.ts";
 import { usdPrice } from "./jupiter.ts";
-import type { OrderStatus } from "./model.ts";
+import type { Chain, OrderStatus } from "./model.ts";
 import { random } from "./bytes.ts";
 import { base32nopad } from "@scure/base";
 
@@ -38,6 +38,8 @@ const ERRORS: Record<string, string> = {
   no_price: "Prices are updating. Try again in a moment.",
   not_ready: "Revolve is starting up. Try again in a moment.",
   not_found: "Order not found",
+  chain_unavailable: "Buying on Base is paused right now. Try again later.",
+  invalid_chain: "This app version asked for a chain Revolve doesn't offer.",
   invalid_tokens: "Some credits were not accepted.",
   token_spent: "Some of these credits were already used.",
   already_minted: "These credits were already issued.",
@@ -47,6 +49,12 @@ const ERRORS: Record<string, string> = {
   mint_unavailable: "Credits are paused for a moment. Try again shortly.",
   payment_seen: "A payment for this has already been seen, so it can't be cancelled. It's already being processed.",
 };
+
+/** v1.4: a Base order's payout comes as payout_wei; it is kept in payout_lamports, as the vault does. */
+function normalize(q: Quote & { chain?: string; payout_wei?: string }, chain: Chain): Quote {
+  if ((q.chain ?? "solana") !== chain) throw new OrderApiError("server answered for a different chain", 502);
+  return chain === "solana" ? q : { ...q, payout_lamports: q.payout_wei ?? "" };
+}
 
 function checkQuote(q: Quote, amountZec: string): Quote {
   if (!ORDER_ID.test(q.order_id)) throw new OrderApiError("server sent a malformed order id", 502);
@@ -81,9 +89,10 @@ export async function call<T>(path: string, init?: RequestInit): Promise<T> {
 }
 
 /** `amountZec` is the canonical grid amount (formatZec), already checked against /limits. */
-export async function createOrder(amountZec: string): Promise<Quote> {
-  if (import.meta.env.DEV && ORDER_API === "mock") return checkQuote(mock.create(amountZec), amountZec);
-  return checkQuote(await call<Quote>("/orders", { method: "POST", body: JSON.stringify({ amount_zec: amountZec }) }), amountZec);
+export async function createOrder(amountZec: string, chain: Chain = "solana"): Promise<Quote> {
+  if (import.meta.env.DEV && ORDER_API === "mock") return checkQuote(mock.create(amountZec, chain), amountZec);
+  const body = chain === "solana" ? { amount_zec: amountZec } : { amount_zec: amountZec, chain };
+  return checkQuote(normalize(await call<Quote>("/orders", { method: "POST", body: JSON.stringify(body) }), chain), amountZec);
 }
 
 export type LimitsState = { loading: true } | { loading: false; limits: Limits };
@@ -93,10 +102,10 @@ export type LimitsState = { loading: true } | { loading: false; limits: Limits }
  * means the worker is still loading its price and balance: "ask again
  * soon", not "unavailable".
  */
-export async function getLimits(): Promise<LimitsState> {
+export async function getLimits(chain: Chain = "solana"): Promise<LimitsState> {
   if (import.meta.env.DEV && ORDER_API === "mock") return { loading: false, limits: await mock.limits() };
   try {
-    return { loading: false, limits: parseLimits(await call("/limits")) };
+    return { loading: false, limits: parseLimits(await call("/limits"), chain) };
   } catch (e) {
     if (e instanceof OrderApiError && e.status === 503) return { loading: true };
     throw e;
@@ -157,12 +166,13 @@ export const mock = {
       return {};
     }
   },
-  create(amount: string): Quote {
+  create(amount: string, chain: Chain = "solana"): Quote {
     const id = "rv_" + base32nopad.encode(random(5)).toLowerCase();
     const all = mock.load();
     all[id] = { created: Date.now(), amount };
     sessionStorage.setItem(MOCK_KEY, JSON.stringify(all));
-    const lamports = BigInt(Math.round(Number(amount) * 12.2 * 1e9));
+    // Demo rates: about 12.2 SOL or 0.4 ETH per ZEC.
+    const lamports = chain === "solana" ? BigInt(Math.round(Number(amount) * 12.2 * 1e9)) : BigInt(Math.round(Number(amount) * 0.4 * 1e9)) * 1_000_000_000n;
     return {
       order_id: id,
       deposit_ua: MOCK_UA,
@@ -172,8 +182,8 @@ export const mock = {
     };
   },
   /** A credits order: already backed, so it goes straight to the payout delay. */
-  credit(amount: string): { order_id: string; payout_lamports: string } {
-    const q = mock.create(amount);
+  credit(amount: string, chain: Chain = "solana"): { order_id: string; payout_lamports: string } {
+    const q = mock.create(amount, chain);
     const all = mock.load();
     all[q.order_id]!.credits = true;
     sessionStorage.setItem(MOCK_KEY, JSON.stringify(all));

@@ -5,15 +5,18 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { useVault } from "./vault.tsx";
 import { newBurner } from "../lib/burner.ts";
-import { MOCK, SOL_MINT, SWAP_RESERVE_LAMPORTS } from "../lib/config.ts";
+import { baseFundedEnough, baseUsdPrice, buyBase, sellBaseAll } from "../lib/baseswap.ts";
+import { erc20Balance, ethBalance, newEvmBurner } from "../lib/evm.ts";
+import { ETH_MINT, MOCK, SOL_MINT, SWAP_RESERVE_LAMPORTS } from "../lib/config.ts";
 import { buildMemo, zip321 } from "../lib/memo.ts";
 import { cancelOrder, createOrder, getOrder, OrderApiError, type OrderState } from "../lib/orders.ts";
 import { ultraOrder, usdPrice } from "../lib/jupiter.ts";
 import { lamports, tokenRaw } from "../lib/solana.ts";
 import { buyWithPayout, fundedEnough, NotFunded, sellAll } from "../lib/swap.ts";
 import { Stagger } from "../lib/stagger.ts";
+import { cashOf } from "../lib/chain.ts";
 import { random } from "../lib/bytes.ts";
-import type { Position, Stage, TokenRef } from "../lib/model.ts";
+import type { Chain, Position, Stage, TokenRef } from "../lib/model.ts";
 
 const POLL_MS: [number, number] = [9_000, 18_000];
 const PRICE_TTL_MS = 60_000;
@@ -23,7 +26,7 @@ const RETRY_MS = 15_000;
 type Engine = {
   prices: Record<string, number>;
   busy: Record<string, string>;
-  startOrder(token: TokenRef, amountZec: string): Promise<string>;
+  startOrder(token: TokenRef, amountZec: string, chain?: Chain): Promise<string>;
   /** User-started signing (a retried buy, a sale) asks for a fresh passkey check first; the automatic buy after a payout does not. */
   retrySwap(id: string): Promise<void>;
   sell(id: string): Promise<void>;
@@ -36,6 +39,8 @@ type Engine = {
   refresh(id: string): void;
   /** Fetches one asset's price now (no wallet involved, so no stagger needed). */
   priceOf(mint: string): void;
+  /** A position's asset and cash prices: Jupiter on Solana, KyberSwap and ETH on Base. */
+  pricePosition(p: Position): void;
 };
 
 const Ctx = createContext<Engine | null>(null);
@@ -47,7 +52,7 @@ export function useEngine(): Engine {
 }
 
 export function paymentLink(p: Position): string {
-  return zip321(p.order.depositUa, p.order.amountZec, buildMemo(p.order.id, p.burner.pub));
+  return zip321(p.order.depositUa, p.order.amountZec, buildMemo(p.order.id, p.burner.pub, p.chain));
 }
 
 /** The stage an order status implies. `p` is the position before the status is applied. */
@@ -102,16 +107,26 @@ export function EngineProvider({ children }: { children: ReactNode }) {
     if (usd !== null) setPrices((p) => ({ ...p, [mint]: usd }));
   }, []);
 
+  /** A Base token's USD price, from KyberSwap's valuation; kept in the same map, keyed by contract address. */
+  const basePrice = useCallback(async (t: { mint: string; decimals: number }) => {
+    if (Date.now() - (priceAt.current[t.mint] ?? 0) < PRICE_TTL_MS) return;
+    priceAt.current[t.mint] = Date.now();
+    const usd = await baseUsdPrice(t);
+    if (usd !== null) setPrices((p) => ({ ...p, [t.mint]: usd }));
+  }, []);
+
   // ---- buy: burner first, then the order, both sealed before the link exists ----
   const startOrder = useCallback(
-    async (token: TokenRef, amountZec: string) => {
-      const burner = newBurner();
-      const quote = await createOrder(amountZec);
-      paymentLink({ burner, order: { id: quote.order_id, depositUa: quote.deposit_ua, amountZec: quote.amount_zec } } as Position);
+    async (token: TokenRef, amountZec: string, chain: Chain = "solana") => {
+      const burner = chain === "base" ? newEvmBurner() : newBurner();
+      const quote = await createOrder(amountZec, chain);
+      const onChain = chain === "base" ? { chain } : {};
+      paymentLink({ burner, ...onChain, order: { id: quote.order_id, depositUa: quote.deposit_ua, amountZec: quote.amount_zec } } as Position);
       const id = Array.from(random(8), (b) => b.toString(16).padStart(2, "0")).join("");
       const pos: Position = {
         id,
         createdAt: Date.now(),
+        ...onChain,
         burner,
         token,
         order: {
@@ -177,19 +192,21 @@ export function EngineProvider({ children }: { children: ReactNode }) {
       setBusyFor(p.id, "Buying");
       try {
         await updatePosition(p.id, (x) => void (x.stage = "swapping"));
-        if (p.token.mint === SOL_MINT) {
+        if (p.token.mint === SOL_MINT && !p.chain) {
           await updatePosition(p.id, (x) => void (x.stage = "held"));
           return;
         }
         let out: { sig: string; inAmount: string; outAmount: string };
-        if (p.demo) {
+        if (p.demo && p.chain === "base") {
+          out = { sig: "demo", inAmount: p.order.payoutLamports, outAmount: (10n ** BigInt(p.token.decimals) * 42n).toString() };
+        } else if (p.demo) {
           const spend = BigInt(p.order.payoutLamports) - SWAP_RESERVE_LAMPORTS;
           const q = await ultraOrder(SOL_MINT, p.token.mint, spend);
           out = { sig: "demo", inAmount: q.inAmount, outAmount: q.outAmount };
         } else {
           // The chain is the record: if an earlier attempt landed but its
           // answer was lost, the asset is already there. Never buy twice.
-          const already = await tokenRaw(p.burner.pub, p.token.mint);
+          const already = p.chain === "base" ? await erc20Balance(p.token.mint, p.burner.pub) : await tokenRaw(p.burner.pub, p.token.mint);
           if (already > 0n) {
             await updatePosition(p.id, (x) => {
               x.stage = "held";
@@ -197,7 +214,7 @@ export function EngineProvider({ children }: { children: ReactNode }) {
             });
             return;
           }
-          out = await buyWithPayout(p);
+          out = p.chain === "base" ? await buyBase(p) : await buyWithPayout(p);
         }
         await updatePosition(p.id, (x) => {
           x.stage = "held";
@@ -240,7 +257,7 @@ export function EngineProvider({ children }: { children: ReactNode }) {
       if (p.stage === "swapping") {
         // Left mid-swap by a reload: the chain says whether it went through.
         inFlight.current.add(p.id);
-        const check = p.demo ? Promise.resolve(0n) : tokenRaw(p.burner.pub, p.token.mint);
+        const check = p.demo ? Promise.resolve(0n) : p.chain === "base" ? erc20Balance(p.token.mint, p.burner.pub) : tokenRaw(p.burner.pub, p.token.mint);
         void check
           .then((raw) => updatePosition(p.id, (x) => void (x.stage = raw > 0n ? "held" : "funded")))
           .catch(() => updatePosition(p.id, (x) => void (x.stage = "funded")))
@@ -275,7 +292,8 @@ export function EngineProvider({ children }: { children: ReactNode }) {
           });
           return;
         }
-        await sellAll(p);
+        if (p.chain === "base") await sellBaseAll(p);
+        else await sellAll(p);
         await updatePosition(id, (x) => {
           x.stage = "closed";
           x.balance = { lamports: x.balance?.lamports ?? "0", tokenRaw: "0", at: Date.now() };
@@ -310,6 +328,16 @@ export function EngineProvider({ children }: { children: ReactNode }) {
     const s = new Stagger(async (id) => {
       const p = latest.current.find((x) => x.id === id);
       if (!p) return;
+      if (p.chain === "base") {
+        await Promise.all([basePrice(p.token), price(ETH_MINT)]);
+        if (p.demo) return;
+        const [wei, raw] = await Promise.all([ethBalance(p.burner.pub), erc20Balance(p.token.mint, p.burner.pub)]);
+        await updatePosition(id, (x) => {
+          if (x.balance?.lamports !== wei.toString() || x.balance?.tokenRaw !== raw.toString()) x.balance = { lamports: wei.toString(), tokenRaw: raw.toString(), at: Date.now() };
+          if (x.stage === "settling" && baseFundedEnough(wei)) x.stage = "funded";
+        });
+        return;
+      }
       if (p.token.mint !== SOL_MINT) await price(p.token.mint);
       await price(SOL_MINT);
       if (p.demo) return;
@@ -326,7 +354,7 @@ export function EngineProvider({ children }: { children: ReactNode }) {
       s.stop();
       stagger.current = null;
     };
-  }, [!!data, price, updatePosition]);
+  }, [!!data, price, basePrice, updatePosition]);
 
   const watchIds = positions
     .filter((p) => p.stage === "held" || p.stage === "funded" || p.stage === "swap_failed" || (p.stage === "settling" && (p.order.status === "paid_out" || p.order.status === "gone")))
@@ -339,10 +367,18 @@ export function EngineProvider({ children }: { children: ReactNode }) {
   const refresh = useCallback((id: string) => stagger.current?.soon(id), []);
 
   const priceOf = useCallback((mint: string) => void price(mint), [price]);
+  const pricePosition = useCallback(
+    (p: Position) => {
+      if (p.chain === "base") void basePrice(p.token);
+      else void price(p.token.mint);
+      void price(cashOf(p).mint);
+    },
+    [price, basePrice],
+  );
 
   const api = useMemo<Engine>(
-    () => ({ prices, busy, startOrder, retrySwap, sell, cancel, refresh, priceOf }),
-    [prices, busy, startOrder, retrySwap, sell, cancel, refresh, priceOf],
+    () => ({ prices, busy, startOrder, retrySwap, sell, cancel, refresh, priceOf, pricePosition }),
+    [prices, busy, startOrder, retrySwap, sell, cancel, refresh, priceOf, pricePosition],
   );
   return <Ctx.Provider value={api}>{children}</Ctx.Provider>;
 }

@@ -12,7 +12,9 @@ export type Route =
   | { name: "fund" }
   | { name: "funding"; id: string }
   | { name: "market"; id: string }
-  | { name: "nft"; symbol: string };
+  | { name: "nft"; symbol: string }
+  | { name: "base" }
+  | { name: "baseToken"; address: string };
 
 export function parse(hash: string): Route {
   const [, a, b] = hash.replace(/^#/, "").split("/");
@@ -24,6 +26,8 @@ export function parse(hash: string): Route {
   if (a === "market" && b) return { name: "market", id: decodeURIComponent(b) };
   if (a === "nft" && b) return { name: "nft", symbol: decodeURIComponent(b) };
   if (a === "fund") return { name: "fund" };
+  if (a === "base" && b) return { name: "baseToken", address: decodeURIComponent(b) };
+  if (a === "base") return { name: "base" };
   return { name: "home" };
 }
 
@@ -37,6 +41,8 @@ export const href = {
   funding: (id: string) => `#/fund/${id}`,
   market: (id: string) => `#/market/${encodeURIComponent(id)}`,
   nft: (symbol: string) => `#/nft/${encodeURIComponent(symbol)}`,
+  base: "#/base",
+  baseToken: (address: string) => `#/base/${encodeURIComponent(address)}`,
 };
 
 export function go(to: string): void {

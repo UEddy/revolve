@@ -8,7 +8,7 @@ import { b64, fromB64 } from "./bytes.ts";
 import { call, cancelAt, mock as orderMock, OrderApiError, type CancelOutcome } from "./orders.ts";
 import { parseZec } from "./amount.ts";
 import { CREDIT_ZATS, spendOutcomeFor, type SpendOutcome } from "./credits.ts";
-import type { CreditToken, FundingStatus } from "./model.ts";
+import type { Chain, CreditToken, FundingStatus } from "./model.ts";
 
 const ID = /^[A-Za-z0-9_]{8,64}$/;
 
@@ -59,12 +59,18 @@ export async function signFunding(fundId: string, blinded: string[]): Promise<st
 export type SpendResult = { outcome: "created"; orderId: string; payoutLamports: string } | { outcome: Exclude<SpendOutcome, "created">; message: string };
 
 /** POST /orders, spend form. Never throws: every answer maps to a SpendOutcome (credits.ts says what happens to the tokens). */
-export async function spend(amountZec: string, tokens: CreditToken[], burner: string): Promise<SpendResult> {
+export async function spend(amountZec: string, tokens: CreditToken[], burner: string, chain: Chain = "solana"): Promise<SpendResult> {
   try {
-    const body = { amount_zec: amountZec, tokens: tokens.map(({ msg, sig }) => ({ msg, sig })), burner };
-    const r = import.meta.env.DEV && ORDER_API === "mock" ? await mintMock.spend(body) : await call<{ order_id: string; payout_lamports: string }>("/orders", { method: "POST", body: JSON.stringify(body) });
-    if (!ID.test(r.order_id) || !/^\d+$/.test(r.payout_lamports)) return { outcome: "error", message: "The order service sent a malformed answer" };
-    return { outcome: "created", orderId: r.order_id, payoutLamports: r.payout_lamports };
+    const body = { amount_zec: amountZec, tokens: tokens.map(({ msg, sig }) => ({ msg, sig })), burner, ...(chain === "solana" ? {} : { chain }) };
+    const r =
+      import.meta.env.DEV && ORDER_API === "mock"
+        ? await mintMock.spend(body)
+        : await call<{ order_id: string; chain?: string; payout_lamports?: string; payout_wei?: string }>("/orders", { method: "POST", body: JSON.stringify(body) });
+    // v1.4: Base answers payout_wei; the vault keeps either in payoutLamports.
+    const payout = chain === "solana" ? r.payout_lamports : (r as { payout_wei?: string }).payout_wei;
+    const sameChain = ((r as { chain?: string }).chain ?? "solana") === chain || (import.meta.env.DEV && ORDER_API === "mock");
+    if (!ID.test(r.order_id) || !payout || !/^\d+$/.test(payout) || !sameChain) return { outcome: "error", message: "The order service sent a malformed answer" };
+    return { outcome: "created", orderId: r.order_id, payoutLamports: payout };
   } catch (e) {
     if (!(e instanceof OrderApiError)) return { outcome: "network", message: "No answer from Revolve. Retrying with the same credits." };
     return { outcome: spendOutcomeFor(e.code), message: e.message };
@@ -74,7 +80,7 @@ export async function spend(amountZec: string, tokens: CreditToken[], burner: st
 // ---- demo mode: a real blind-RSA mint with a throwaway key, in this tab only ----
 
 const MOCK_KEY = "revolve.mock.mint";
-type MockMint = { pub: JsonWebKey; priv: JsonWebKey; spki: string; fundings: Record<string, { amount: string; credits: number; created: number; minted: boolean; setKey?: string }>; spent: string[]; spends?: Record<string, { order_id: string; payout_lamports: string }> };
+type MockMint = { pub: JsonWebKey; priv: JsonWebKey; spki: string; fundings: Record<string, { amount: string; credits: number; created: number; minted: boolean; setKey?: string }>; spent: string[]; spends?: Record<string, { order_id: string; payout_lamports: string; payout_wei?: string }> };
 let mockCache: Promise<{ state: MockMint; priv: CryptoKey; pub: CryptoKey }> | null = null;
 
 const mintMock = {
@@ -151,7 +157,7 @@ const mintMock = {
     mintMock.save(state);
     return { signatures };
   },
-  async spend(body: { amount_zec: string; tokens: { msg: string; sig: string }[]; burner: string }): Promise<{ order_id: string; payout_lamports: string }> {
+  async spend(body: { amount_zec: string; tokens: { msg: string; sig: string }[]; burner: string; chain?: Chain }): Promise<{ order_id: string; payout_lamports: string; payout_wei?: string }> {
     const { state, pub } = await mintMock.load();
     const s = RSABSSA.SHA384.PSS.Randomized();
     if (BigInt(body.tokens.length) * CREDIT_ZATS !== parseZec(body.amount_zec)) throw new OrderApiError("Some credits were not accepted.", 400, "invalid_tokens");
@@ -166,7 +172,8 @@ const mintMock = {
     if (prior) return prior;
     if (hashes.some((h) => state.spent.includes(h))) throw new OrderApiError("Some of these credits were already used.", 409, "token_spent");
     state.spent.push(...hashes);
-    const order = orderMock.credit(body.amount_zec);
+    const credit = orderMock.credit(body.amount_zec, body.chain);
+    const order = body.chain === "base" ? { ...credit, payout_wei: credit.payout_lamports } : credit;
     (state.spends ??= {})[spendKey] = order;
     mintMock.save(state);
     return order;
