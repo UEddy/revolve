@@ -5,7 +5,7 @@
 import { RSABSSA } from "@cloudflare/blindrsa-ts";
 import { ORDER_API } from "./config.ts";
 import { b64, fromB64 } from "./bytes.ts";
-import { call, mock as orderMock, OrderApiError } from "./orders.ts";
+import { call, cancelAt, mock as orderMock, OrderApiError, type CancelOutcome } from "./orders.ts";
 import { parseZec } from "./amount.ts";
 import { CREDIT_ZATS, spendOutcomeFor, type SpendOutcome } from "./credits.ts";
 import type { CreditToken, FundingStatus } from "./model.ts";
@@ -42,6 +42,12 @@ export async function getFunding(fundId: string): Promise<{ status: FundingStatu
     if (e instanceof OrderApiError && e.status === 404) return null;
     throw e;
   }
+}
+
+/** DELETE /mint/orders/:id: only while no payment has been seen. */
+export async function cancelFunding(fundId: string): Promise<CancelOutcome> {
+  if (import.meta.env.DEV && ORDER_API === "mock") return mintMock.cancel(fundId);
+  return cancelAt(`/mint/orders/${encodeURIComponent(fundId)}`);
 }
 
 export async function signFunding(fundId: string, blinded: string[]): Promise<string[]> {
@@ -120,6 +126,14 @@ const mintMock = {
     if (f.minted) return { status: "minted" };
     const s = (Date.now() - f.created) / 1000;
     return { status: s < 15 ? "awaiting_payment" : s < 30 ? "seen" : "funded" };
+  },
+  async cancel(fundId: string): Promise<CancelOutcome> {
+    const { state } = await mintMock.load();
+    if (!state.fundings[fundId]) return "unknown";
+    if ((await mintMock.status(fundId))?.status !== "awaiting_payment") return "processing";
+    delete state.fundings[fundId];
+    mintMock.save(state);
+    return "cancelled";
   },
   async sign(fundId: string, blinded: string[]): Promise<{ signatures: string[] }> {
     const { state, priv } = await mintMock.load();

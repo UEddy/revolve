@@ -278,7 +278,9 @@ h3 { font-size: 16px; margin: 0; }
 
 /* ---------- payment card: QR and copyable fields ---------- */
 .payqr { margin: 18px auto 14px; width: min(100%, 280px); aspect-ratio: 1; padding: 0; border-radius: 14px; overflow: hidden; }
-.payqr svg { display: block; width: 100%; height: 100%; }
+.payqr svg, .payqr img { display: block; width: 100%; height: 100%; }
+/* A real image, so a long-press offers the browser's Download image / Save to Photos. */
+.payqr img { image-rendering: pixelated; -webkit-touch-callout: default; user-select: auto; }
 .payqr-paper { fill: var(--qr-paper); }
 .payqr-ink { fill: var(--qr-ink); }
 .payfield { padding: 10px 0; border-top: 1px solid var(--line); }

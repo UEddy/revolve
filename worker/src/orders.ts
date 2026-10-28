@@ -61,6 +61,9 @@ export type SpendResult =
   | { kind: "created" | "retried"; orderId: string; payoutLamports: bigint }
   | { kind: "token_spent" | "amount_unavailable" | "busy" | "no_price" };
 
+/** `cancelled` deleted the record; `not_found` covers unknown and already paid-out ids. */
+export type CancelResult = "cancelled" | "not_found" | "payment_seen";
+
 export interface DuePayout {
   orderId: string;
   burner: string;
@@ -127,6 +130,30 @@ export function zatToZec(zat: bigint): string {
   const frac = (zat % 100_000_000n).toString().padStart(8, "0").replace(/0+$/, "");
   return frac ? `${whole}.${frac}` : `${whole}`;
 }
+
+/** Deletes an unpaid row (no note seen) and records the id's hash; shared by orders and fundings. */
+export function cancelRow(db: DatabaseSync, table: "orders" | "fund_orders", idCol: string, id: string): CancelResult {
+  db.exec("BEGIN IMMEDIATE");
+  try {
+    const r = db
+      .prepare(`DELETE FROM ${table} WHERE ${idCol} = ? AND note_key IS NULL AND status IN ('awaiting_payment','expired')`)
+      .run(id);
+    if (Number(r.changes) === 1) {
+      db.prepare("INSERT OR IGNORE INTO cancelled_ids VALUES (?)").run(hash(id));
+      db.exec("COMMIT");
+      return "cancelled";
+    }
+    const exists = db.prepare(`SELECT 1 FROM ${table} WHERE ${idCol} = ?`).get(id);
+    db.exec("COMMIT");
+    return exists ? "payment_seen" : "not_found";
+  } catch (e) {
+    if (db.isTransaction) db.exec("ROLLBACK");
+    throw e;
+  }
+}
+
+export const wasCancelled = (db: DatabaseSync, id: string) =>
+  db.prepare("SELECT 1 FROM cancelled_ids WHERE id_hash = ?").get(hash(id)) !== undefined;
 
 const noteKey = (n: NoteLine) => `${n.txid}:${n.pool}:${n.output_index}`;
 const hash = (s: string) => createHash("sha256").update(s).digest("hex");
@@ -201,6 +228,18 @@ export class OrderBook {
     for (const [id, p] of this.paid) if (p.until <= this.now()) this.paid.delete(id);
   }
 
+  /**
+   * Cancels an unpaid order: allowed only while no note has been seen for it
+   * (awaiting_payment, or expired unpaid). The row is deleted, which releases the
+   * inventory it reserved, and only a hash of the id is kept so a payment that
+   * still arrives goes to review. The check and delete are one statement, so a
+   * note applied concurrently either lands first (payment_seen) or finds no order.
+   */
+  cancel(orderId: string): CancelResult {
+    if (this.paid.has(orderId)) return "payment_seen";
+    return cancelRow(this.db, "orders", "order_id", orderId);
+  }
+
   /** Applies one watcher line. Lines are idempotent and repeat as confirmations grow. */
   onNote(n: NoteLine): void {
     const key = noteKey(n);
@@ -223,7 +262,7 @@ export class OrderBook {
     const memo = parseMemo(n.memo);
     if (!memo) return this.reviewNote(key, n, "malformed_memo");
     const order = this.row(memo.orderId);
-    if (!order) return this.reviewNote(key, n, "unknown_order");
+    if (!order) return this.reviewNote(key, n, wasCancelled(this.db, memo.orderId) ? "paid_after_cancel" : "unknown_order");
     if (order.status !== "awaiting_payment" && order.status !== "expired") {
       return this.reviewNote(key, n, "duplicate_payment");
     }

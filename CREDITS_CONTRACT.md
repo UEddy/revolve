@@ -33,6 +33,16 @@ The watcher/worker match on fund_id AND exact amount, same review rules as order
 Response 200: `{ "status": "funded", "confirmations": 3 }`. 404 `not_found` for an unknown fund_id.
 Statuses: `awaiting_payment`, `seen`, `funded` (3 confirmations), `minted`, `expired`, `needs_review`.
 
+## DELETE /mint/orders/:fund_id
+
+Cancels a funding nobody has paid yet, with the same rules as `DELETE /orders/:order_id`: allowed only while no payment note has been seen (`awaiting_payment`, or `expired` without a payment).
+
+- 204, no body: cancelled; the record is deleted and `GET` then answers 404.
+- 409 `payment_seen`: a payment has been seen (`seen`, `funded`, `minted`, `needs_review`). The funding is kept.
+- 404 `not_found`: unknown or already cancelled.
+
+A payment that still arrives for a cancelled funding goes to manual review (`paid_after_cancel`) and is never minted automatically.
+
 ## POST /mint/orders/:fund_id/sign
 
 Only when status is `funded`. Request: `{ "blinded": ["b64", ...] }` with exactly `credits` entries.

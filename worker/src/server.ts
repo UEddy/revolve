@@ -11,6 +11,7 @@ import {
   onGrid,
   zatToZec,
   zecToZat,
+  type CancelResult,
   type OrderBook,
 } from "./orders.ts";
 
@@ -78,12 +79,12 @@ export function createApi(deps: ServerDeps) {
     try {
       const path = new URL(req.url ?? "/", "http://x").pathname;
       if (req.method === "OPTIONS") {
-        res.setHeader("Access-Control-Allow-Methods", "GET, POST");
+        res.setHeader("Access-Control-Allow-Methods", "GET, POST, DELETE");
         res.setHeader("Access-Control-Allow-Headers", "Content-Type");
         res.setHeader("Access-Control-Max-Age", "600");
         return send(res, 204);
       }
-      if (!(req.method === "POST" ? limits.write : limits.read).take()) {
+      if (!(req.method === "POST" || req.method === "DELETE" ? limits.write : limits.read).take()) {
         res.setHeader("Retry-After", "1");
         return send(res, 503, { error: "busy" });
       }
@@ -98,12 +99,16 @@ export function createApi(deps: ServerDeps) {
           const fund = deps.book.funds.get(f[1]);
           return fund ? send(res, 200, fund) : send(res, 404, { error: "not_found" });
         }
+        if (req.method === "DELETE" && !f[2]) return sendCancel(res, deps.book.funds.cancel(f[1]));
         if (req.method === "POST" && f[2]) return await postSign(req, res, deps, f[1]);
       }
       const m = /^\/orders\/([^/]+)$/.exec(path);
       if (req.method === "GET" && m) {
         const order = isOrderId(m[1]) ? deps.book.get(m[1]) : null;
         return order ? send(res, 200, order) : send(res, 404, { error: "not_found" });
+      }
+      if (req.method === "DELETE" && m) {
+        return isOrderId(m[1]) ? sendCancel(res, deps.book.cancel(m[1])) : send(res, 404, { error: "not_found" });
       }
       send(res, 404, { error: "not_found" });
     } catch {
@@ -116,6 +121,12 @@ export function createApi(deps: ServerDeps) {
   server.keepAliveTimeout = 5_000;
   server.maxHeadersCount = 50;
   return server;
+}
+
+/** 204 once cancelled, 409 once a payment has been seen, else 404. */
+function sendCancel(res: ServerResponse, r: CancelResult) {
+  if (r === "cancelled") return send(res, 204);
+  send(res, r === "payment_seen" ? 409 : 404, { error: r });
 }
 
 /** An amount is available when there is a price and the hot wallet can cover its payout. */
