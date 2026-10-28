@@ -121,9 +121,24 @@ Stated plainly, so nobody has to dig for them:
 | Payout: 0.065380967 SOL from the hot wallet to a fresh wallet | [`4uTmgrG2…QtTGd8m2`](https://solscan.io/tx/4uTmgrG2wcg66VkmFFfEzk8nD8KazRaiGQ2maQFwSLVbb1WMaSRg7JUCXfzdGBakZijhsEqxiZDesZx6QtTGd8m2) |
 | Buy on the device: that wallet bought 330,983 BONK, 4 minutes later | [`KPoQSXNf…Rq3pPe`](https://solscan.io/tx/KPoQSXNf4NFaJL6tbYUCsjx9pxCbU5bBq8YTRt9SuCEZtQhKBGCEwxBJEDH35vSWZamMp9VgwDGTdnHUwRq3pPe) |
 | Wrong-memo payment: 0.0005 ZEC with a malformed memo, held for review, not paid out | [`b3bf882c70d4d2f67f8e4e5554e5056aaad9eba9c3c3944befbf0d53a575c2e3`](https://mainnet.zcashexplorer.app/transactions/b3bf882c70d4d2f67f8e4e5554e5056aaad9eba9c3c3944befbf0d53a575c2e3) |
-| **TODO (Eddy): credits run, fund → mint → spend → payout** | **TODO: txids and signatures** |
 
-Both Zcash transactions show as fully shielded on the explorer (Orchard actions, no transparent inputs or outputs). The worker's database holds no record of the paid order any more, only a hash of the deposit note, which matches this deposit.
+
+The deposit and the wrong-memo payment both show as fully shielded on the explorer (Orchard actions, no transparent inputs or outputs). The worker's database holds no record of the paid order any more, only a hash of the deposit note, which matches this deposit.
+
+### A full credits run: fund, mint, spend, buy, sell, cash out
+
+| Step | Transaction |
+|---|---|
+| Fund, twice: 0.002 and 0.003 ZEC, shielded from Zodl to the deposit address (memo `rv1f\|<funding id>`, no wallet in it) | [`750e6fa3…84ad13`](https://mainnet.zcashexplorer.app/transactions/750e6fa32c4ccfd91e3cd396d3d5de8d3f2d3924921ed57a806c8b5ffe84ad13), [`5634fd6f…fead002`](https://mainnet.zcashexplorer.app/transactions/5634fd6f5469f8d0ae3ccf89dd1b10d77c3e4dafbc5607bbf2fc89527fead002) |
+| Mint: 5 credits, blind-signed (RFC 9474) | Off-chain by design: the server signed tokens it never saw, so no transaction exists |
+| Spend: 2 credits on a PUMP buy, after a fresh passkey check | Off-chain: the server checked the tokens and recorded only their hashes |
+| Payout: SOL from the shared hot wallet to a fresh wallet | [`59oZ5SHp…jtMV2LAm`](https://solscan.io/tx/59oZ5SHpXzMyPnu7B7KSeYaJCh3B5dQHiVtgubU2zJ5ndCUYEPAzdqdcPJxsDeTVKmjhRkepsJ78DUjvjtMV2LAm) |
+| Buy on the device: that wallet bought PUMP | [`vXmK1Bry…vwTGikZZ`](https://solscan.io/tx/vXmK1Bry1zUPqEdSXftbd35HdmjcD5mWHkAgq8ojk2nqyeTfQt3NYv3xHPZzM4iXEM7adH5bVsRxxEhvwTGikZZ) |
+| Sell in the same wallet: PUMP back to SOL, nothing sent anywhere else | [`4i1Jyd4V…dak1bfhu`](https://solscan.io/tx/4i1Jyd4VtJrKRLydcnJj1gp9NZ9K9WVX5Fvk8JokqD28ynd9zcZrcTvG46HKi1728k4mKJPUnsEye3wzdak1bfhu) |
+| Cash out to credits: the SOL back to the shared hot wallet, the transfer naming its cash-in in a memo; credits blind-signed for it | [`2XRcrWG9…PDoL7fNA`](https://solscan.io/tx/2XRcrWG9RFCmh2PePjv5eqBvcQkG2HkGvCsf9kAPHBp9UVJRwJrMtJTbk4uFRPcm16jKkHTWAM47zM8fPDoL7fNA) |
+| **TODO (Eddy): withdraw credits to shielded ZEC** | **TODO: Zcash txid** |
+
+Only the phone holds that fresh wallet's key, and these four are everything it did on Solana: funded by the shared payout wallet, a buy, a sale, and a transfer back to that same shared wallet. Nothing in it points to the Zcash fundings, to Zodl, or to any other position.
 
 ## How Revolve differs from NEAR Intents
 
