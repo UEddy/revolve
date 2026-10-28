@@ -7,7 +7,9 @@ import { RSABSSA } from "@cloudflare/blindrsa-ts";
 import { openDb } from "../src/db.ts";
 import { Mint, b64 } from "../src/mint.ts";
 import { OrderBook, type NoteLine } from "../src/orders.ts";
-import { Bucket, createApi } from "../src/server.ts";
+import { Bucket, createApi, type ServerDeps } from "../src/server.ts";
+import type { CashinRail, Verdict } from "../src/cashin.ts";
+import { WithdrawBook, runWithdrawals, type ZecPayer } from "../src/withdrawals.ts";
 
 // The client side (prepare, blind, finalize) is the library, as in the app.
 const suite = RSABSSA.SHA384.PSS.Randomized();
@@ -65,7 +67,7 @@ async function withMintApi(
     state: { free: bigint | null; price: boolean };
     db: ReturnType<typeof openDb>;
   }) => Promise<void>,
-  opts: { mint?: Mint | null; chains?: ("solana" | "base")[] } = {},
+  opts: { mint?: Mint | null; chains?: ("solana" | "base")[]; cashin?: ServerDeps["cashin"]; withdraw?: (db: ReturnType<typeof openDb>) => ServerDeps["withdraw"] } = {},
 ) {
   const db = openDb(":memory:");
   const book = new OrderBook(db);
@@ -81,6 +83,8 @@ async function withMintApi(
     freeInventory: () => state.free,
     mint: opts.mint === undefined ? mint : opts.mint,
     chains: opts.chains,
+    cashin: opts.cashin,
+    withdraw: opts.withdraw?.(db),
     // Rate limits have their own test (hardening.test.ts); these tests make bursts of calls.
     limits: { write: new Bucket(1e9, 1e9), read: new Bucket(1e9, 1e9) },
   });
@@ -480,4 +484,191 @@ test("spend on Base: payout_wei to a checksummed address; bad chain, bad address
     assert.deepEqual(await r.json(), { error: "chain_unavailable" });
     assert.equal(spent(), 0);
   });
+});
+
+// ---- v1.5: cash out to credits, withdraw to shielded ZEC ----
+
+const HOT = Keypair.generate().publicKey.toBase58();
+
+/** A cash-in rail whose chain is a table of transaction ids and verdicts; it records what it was asked. */
+function fakeRail(verdicts: Record<string, Verdict>) {
+  const asked: { tx: string; min: bigint; notBefore: number; notAfter: number; fundId: string }[] = [];
+  const rail: CashinRail = {
+    payTo: HOT,
+    perCredit: () => 88_000n,
+    normalizeTx: (tx) => (/^[a-z0-9]+$/.test(tx) ? tx : null),
+    verify: async (tx, min, notBefore, notAfter, fundId) => {
+      asked.push({ tx, min, notBefore, notAfter, fundId });
+      return verdicts[tx] ?? "pending";
+    },
+  };
+  return { rail, asked };
+}
+
+test("cash-in: quote, a transfer checked on chain, then credits signed like any funding; a transaction funds once", async () => {
+  const { rail, asked } = fakeRail({ goodtx: "ok", badtx: "bad", othertx: "ok" });
+  await withMintApi(
+    async ({ base, book }) => {
+      const limits = (await (await fetch(`${base}/limits`)).json()) as { cashin: Record<string, { per_credit: string }> };
+      assert.deepEqual(limits.cashin, { solana: { per_credit: "88000" } });
+
+      for (const [body, code] of [
+        [{ chain: "solana", credits: 0 }, "invalid_amount"],
+        [{ chain: "solana", credits: 51 }, "invalid_amount"],
+        [{ chain: "solana", credits: 1.5 }, "invalid_amount"],
+        [{ chain: "tron", credits: 3 }, "invalid_chain"],
+      ] as const) {
+        const r = await json(base, "/cashins", body);
+        assert.equal(r.status, 400);
+        assert.deepEqual(await r.json(), { error: code });
+      }
+      const noBase = await json(base, "/cashins", { chain: "base", credits: 3 });
+      assert.equal(noBase.status, 503);
+      assert.deepEqual(await noBase.json(), { error: "cashin_unavailable" });
+
+      const q = (await (await json(base, "/cashins", { chain: "solana", credits: 3 })).json()) as Record<string, string | number>;
+      assert.equal(q.pay_to, HOT);
+      assert.equal(q.pay_lamports, "264000");
+      assert.equal(q.credits, 3);
+      const id = q.fund_id as string;
+      const status = async () => ((await (await fetch(`${base}/mint/orders/${id}`)).json()) as { status: string }).status;
+      assert.equal(await status(), "awaiting_payment");
+
+      const sent = (tx: string, fund = id) => json(base, `/cashins/${fund}/sent`, { tx });
+      assert.equal((await sent("NOT-A-TX")).status, 400);
+      const pending = await sent("unseen");
+      assert.equal(pending.status, 202);
+      assert.deepEqual(await pending.json(), { status: "pending" });
+      const bad = await sent("badtx");
+      assert.equal(bad.status, 400);
+      assert.deepEqual(await bad.json(), { error: "bad_tx" });
+      assert.equal(await status(), "awaiting_payment", "nothing minted on a bad or unseen transfer");
+
+      const ok = await sent("goodtx");
+      assert.equal(ok.status, 200);
+      assert.deepEqual(await ok.json(), { status: "funded" });
+      const expires = Date.parse(q.expires_at as string) / 1000;
+      assert.deepEqual(asked.at(-1), { tx: "goodtx", min: 264_000n, notBefore: expires - 900 - 60, notAfter: expires + 600, fundId: id });
+      assert.deepEqual(await (await sent("goodtx")).json(), { status: "funded" }, "a repeated report finds it funded");
+
+      const b = await blindTokens(3);
+      const signed = await json(base, `/mint/orders/${id}/sign`, { blinded: b.blinded });
+      assert.equal(signed.status, 200);
+      assert.equal(await status(), "minted");
+
+      const q2 = (await (await json(base, "/cashins", { chain: "solana", credits: 2 })).json()) as { fund_id: string };
+      const reused = await sent("goodtx", q2.fund_id);
+      assert.equal(reused.status, 409);
+      assert.deepEqual(await reused.json(), { error: "tx_used" });
+      assert.equal((await sent("othertx", q2.fund_id)).status, 200);
+
+      // A cash-in is never paid with ZEC: such a note goes to review.
+      const q3 = (await (await json(base, "/cashins", { chain: "solana", credits: 2 })).json()) as { fund_id: string };
+      book.onNote(note(`rv1f|${q3.fund_id}`, 200_000, 5, "0c".repeat(32)));
+      assert.deepEqual(book.reviewNotes().map((n) => n.reason), ["wrong_rail"]);
+      assert.equal(await status.call(null), "minted");
+    },
+    { cashin: { solana: rail } },
+  );
+});
+
+const UA = "u1" + "q".repeat(120);
+
+function fakePayer(spendable: bigint) {
+  const sends: { id: string; ua: string; zat: bigint }[] = [];
+  let fail = 0;
+  const payer: ZecPayer & { sends: typeof sends; failNext: (n: number) => void } = {
+    sends,
+    failNext: (n) => void (fail = n),
+    checkAddress: (ua) => ua === UA,
+    cachedSpendable: () => spendable,
+    refreshBalance: async () => spendable,
+    send: async (id, ua, zat) => {
+      sends.push({ id, ua, zat });
+      if (fail > 0) {
+        fail--;
+        throw new Error("lightwalletd unreachable");
+      }
+      return "ab".repeat(32);
+    },
+  };
+  return payer;
+}
+
+test("withdrawals: credits spent and queued in one step, exact retry finds it, nothing spent on any refusal", async () => {
+  const payer = fakePayer(500_000n);
+  await withMintApi(
+    async ({ base, spent }) => {
+      const ts = await tokens(3);
+      const bad = await json(base, "/withdrawals", { tokens: ts, address: "t1dCCf1RHzVnkB6KE8d1bzAQypGNktu8zwh" });
+      assert.equal(bad.status, 400);
+      assert.deepEqual(await bad.json(), { error: "invalid_address" });
+      assert.equal(spent(), 0);
+
+      const ok = await json(base, "/withdrawals", { tokens: ts, address: UA });
+      assert.equal(ok.status, 201);
+      const w = (await ok.json()) as { withdrawal_id: string; amount_zec: string; status: string };
+      assert.match(w.withdrawal_id, /^rw_[0-9a-z]{10}$/);
+      assert.deepEqual([w.amount_zec, w.status], ["0.003", "queued"]);
+      assert.equal(spent(), 3);
+      assert.deepEqual(await (await json(base, "/withdrawals", { tokens: [ts[2], ts[0], ts[1]], address: UA })).json(), w);
+      assert.equal(spent(), 3);
+      assert.deepEqual(await (await fetch(`${base}/withdrawals/${w.withdrawal_id}`)).json(), { status: "queued" });
+
+      const reuse = await json(base, "/orders", { amount_zec: "0.003", tokens: ts, burner });
+      assert.deepEqual(await reuse.json(), { error: "token_spent" }, "withdrawn credits can't be spent again");
+
+      // 0.5 ZEC hot wallet: 0.003 queued, 0.0005 kept for fees, so 0.5 more doesn't fit.
+      const big = await json(base, "/withdrawals", { tokens: await tokens(50), address: UA });
+      assert.equal(big.status, 503);
+      assert.deepEqual(await big.json(), { error: "withdraw_unavailable" });
+      assert.equal(spent(), 3);
+    },
+    { withdraw: (db) => ({ book: new WithdrawBook(db), payer }) },
+  );
+  await withMintApi(async ({ base }) => {
+    const r = await json(base, "/withdrawals", { tokens: await tokens(1), address: UA });
+    assert.equal(r.status, 503, "no hot wallet configured");
+  });
+});
+
+test("withdrawals pay after their random delay, one at a time, forget the address, and retry a failed send with the same id", async () => {
+  let now = Date.parse("2026-10-28T10:00:00Z");
+  const db = openDb(":memory:");
+  const book = new WithdrawBook(db, () => now);
+  const payer = fakePayer(10n ** 9n);
+  const mk = (key: string, zat: bigint) => book.create({ tokenHashes: [key], spendKey: key, amountZat: zat, address: UA, fits: () => true });
+  const a = mk("a", 300_000n);
+  const b = mk("b", 200_000n);
+  assert.ok(a.kind === "created" && b.kind === "created");
+
+  now += 19 * 60_000;
+  await runWithdrawals(book, payer, 10n ** 9n);
+  assert.equal(payer.sends.length, 0, "nothing before the 20 minute minimum");
+
+  now += 102 * 60_000;
+  payer.failNext(1);
+  await runWithdrawals(book, payer, 10n ** 9n);
+  assert.equal(payer.sends.length, 1);
+  const first = payer.sends[0]!.id;
+  assert.equal(book.get(first)!.status, "sending");
+  await runWithdrawals(book, payer, 10n ** 9n);
+  assert.equal(payer.sends.length, 1, "a failed send waits before retrying");
+
+  now += 5 * 60_000;
+  await runWithdrawals(book, payer, 10n ** 9n);
+  assert.equal(payer.sends[1]!.id, first, "retried with the same id: the payer re-broadcasts, never pays twice");
+  assert.deepEqual(book.get(first), { status: "sent", txid: "ab".repeat(32) });
+
+  await runWithdrawals(book, payer, 10n ** 9n);
+  assert.equal(payer.sends.length, 3);
+  const left = (db.prepare("SELECT COUNT(*) AS n FROM withdrawals").get() as { n: number }).n;
+  assert.equal(left, 0, "no address kept after sending");
+  assert.equal(book.withdrawnToday(), 500_000n);
+
+  const c = mk("c", 400_000n);
+  assert.ok(c.kind === "created");
+  now += 121 * 60_000;
+  await runWithdrawals(book, payer, 800_000n);
+  assert.equal(payer.sends.length, 3, "waits for the daily cap");
 });

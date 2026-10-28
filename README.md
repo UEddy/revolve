@@ -23,7 +23,7 @@ From one app on your phone you can:
 - **Buy any Solana token or tokenized stock with liquidity** (via Jupiter), paid in shielded ZEC. Live.
 - **Buy tokens on Base** (via KyberSwap): a hand-checked list, or any token by its contract address. Same shielded payment and credits; the payout is ETH to a fresh Base wallet, and the phone signs the buy. New: its first mainnet run is still to come.
 - **Browse** prediction markets (Polymarket) and NFT collections on Solana, Ethereum and Robinhood Chain. Live, read only: these cards say "Buying coming soon".
-- **Sell** a position to SOL (or ETH on Base) inside its own wallet, **send** it out, or, on Solana, **cash out to Zcash** by handing the SOL to Zodl's built-in Swap (deployed; its first mainnet run is still to come).
+- **Sell** a position to SOL (or ETH on Base) inside its own wallet, **send** it out, or **cash out privately**: the coin goes back to Revolve for blind-signed credits, at once or in random parts over hours, and you **withdraw** credits to your shielded Zcash address whenever you like. On Solana, Zodl's built-in Swap stays as a faster second route. New: the first mainnet run of both is still to come.
 
 No bridge UI, no chain selection, no wallet connection, no gas: each position's wallet gets a small SOL reserve with the payout, and the app signs everything on the device.
 
@@ -54,10 +54,35 @@ No bridge UI, no chain selection, no wallet connection, no gas: each position's 
 
 Instead of one Zodl payment per buy, you can fund Revolve once (0.002 to 0.05 ZEC, memo `rv1f|<funding id>`, no wallet in it) and receive **blind-signed credit tokens** (Chaumian e-cash, **RFC 9474** RSABSSA-SHA384-PSS-Randomized, 1 credit = 0.001 ZEC). The phone blinds random token messages, the server signs them blind, and the phone unblinds and keeps them in its vault. A buy then spends tokens after a **fresh passkey check** (user verification required), and pays out after a random 60 to 300 second delay. Because of the blinding, the server cannot tell which deposit minted a spent token, and buys can't be linked to each other by their tokens. The server keeps only hashes of spent tokens, to stop double spends.
 
+### Cashing out without a trail
+
+Getting back to shielded ZEC is where privacy usually breaks, so the default exit avoids both trails a swap leaves:
+
+1. **Cash in.** The position's SOL (or ETH on Base) goes back to Revolve's hot wallet, the same one every user's payouts come from. The transfer names its cash-in (a memo on Solana, input data on Base), so nobody else can claim it. The app reports it; the worker looks it up on chain itself (it succeeded, names this cash-in, paid at least the quoted amount, inside the quote's window, never used before) and only then signs credits for it, blind, exactly as for a ZEC funding.
+2. **Gradually, if you choose.** The cash-out is split into 3 to 6 parts of random sizes, sent at random times over 2 to 8 hours, so neither the amounts nor the times line up with the sale, or with each other.
+3. **Withdraw.** Later, you spend credits to a shielded address (a unified address with an Orchard receiver; transparent addresses are refused). The worker pays after a random 20 to 120 minutes, one withdrawal at a time, from a separate ZEC hot wallet, and then deletes the address.
+
+Why this design, and not the alternatives:
+
+- **No swap provider sees you.** Through a cross-chain swap (Zodl's Swap uses one), the provider must learn both ends: which fresh wallet paid, and which Zcash address to pay. That single record links a position to your Zcash wallet. Here no third party is involved at all.
+- **Revolve can't link them either.** Credits are blind-signed (RFC 9474): the server signs tokens it never sees, so when they come back in a withdrawal it can't tell which cash-in, funding or position they came from. Without that, Revolve would simply be the swap provider, holding the same record.
+- **Amounts and timing are broken up.** The transfer back to Revolve is public on its chain, so the gradual mode, the random delay before every withdrawal, the 0.001 ZEC grid and the coach's warnings (withdrawing right after a cash-in, or exactly the same amount) are what keep it from being paired with the withdrawal.
+- **Fully shielded at the end.** Withdrawals only ever pay an Orchard receiver. We showed on mainnet that the common swap route out of ZEC deshields (see above); how a provider pays back into ZEC is up to the provider, so the exit doesn't depend on one.
+- **Credits are fungible.** Cashed-out credits can also buy the next position directly, without touching Zcash or any chain in between.
+
+Why a ZEC hot wallet is on the server now, and why it's acceptable:
+
+- Paying someone shielded ZEC needs a spending key; a view-only key can't. So withdrawals need one.
+- **It's a separate wallet, not the deposit address.** Its own seed, generated on the server, holding only what an operator moves into it. The deposit address's spending key stays off the server, as before, so deposits in flight are never at risk from it.
+- **The loss is bounded.** A daily withdrawal cap (`WITHDRAW_DAILY_CAP_ZAT`) and its small balance limit what a leaked seed or a forged credit could take.
+- **A leaked seed doesn't reveal who was paid.** Withdrawals are built with no outgoing viewing key (`OvkPolicy::Discard`), so even the hot wallet's own keys can't list past recipients, and the server deletes each address once paid.
+- **It can't pay twice.** Each withdrawal's signed transaction is stored under its id before broadcast; a retry re-broadcasts the same bytes, whose notes can only be spent once.
+
 ## Why it does not leak
 
 - **Nothing public on Zcash.** Fully shielded payment to an Orchard-only address: no public amount, no public sender, encrypted memo.
-- **The server can't move your ZEC.** It holds only a view-only key for the deposit address. The ZEC spending key is not on the server.
+- **The server can't move deposits.** It holds only a view-only key for the deposit address; that spending key is not on the server. Withdrawals come from a separate, capped hot wallet (see above).
+- **Exits leave no trail.** Cashing out to blind-signed credits and withdrawing later means no swap provider ever links a position to your Zcash address, and Revolve can't either.
 - **The server isn't told what you buy.** An order carries an amount and a fresh wallet, never a token; the buy happens on the phone.
 - **A fresh wallet per position.** Every buy lands in its own new wallet, funded by the shared payout wallet like every other Revolve user's.
 - **Keys sealed by your passkey.** The vault is AES-GCM encrypted with a key derived from the passkey (WebAuthn PRF). No password, no seed phrase, no copy on any server.
@@ -78,7 +103,10 @@ Instead of one Zodl payment per buy, you can fund Revolve once (0.002 to 0.05 ZE
 Stated plainly, so nobody has to dig for them:
 
 - **Custodial between deposit and payout.** From the moment your ZEC arrives until the SOL is paid out, Revolve holds the value.
-- **Credits are custodial until spent.** That's capped at 0.05 ZEC per funding. Losing your phone without a vault backup loses them.
+- **Credits are custodial until spent or withdrawn.** That's capped at 0.05 ZEC per funding or cash-in part. Losing your phone without a vault backup loses them.
+- **Withdrawals come from a hot wallet.** A ZEC spending key for that one wallet is on the server; its balance and a daily cap bound the loss. If it runs low, withdrawals wait (your credits stay yours) until it's topped up.
+- **Cash-in transfers are public.** Anyone can see a fresh wallet pay Revolve's hot wallet. What they can't see is where the credits went; timing and amounts are the remaining fingerprint, which is what the gradual mode and the coach are for.
+- **Gradual parts need the app.** A planned part goes out when Revolve is open on your phone at or after its time; the phone holds the keys, so nothing can send for it in the background.
 - **Payouts are public on the destination chain.** Anyone can see the hot wallet pay a fresh wallet and that wallet buy a token. What they can't see is who paid for it.
 - **The relay sees IPs and logs nothing.** It also sees, in transit, which token a fresh wallet swaps into. The order API sees IPs too, and logs nothing. You trust that we run them as published.
 - **Behaviour can still link you.** Timing and amounts are fingerprints: a buy seconds after a funding, the same unusual amount twice, cashing out a whole position right after buying. The coach warns; it can't prevent.
@@ -105,8 +133,8 @@ Both Zcash transactions show as fully shielded on the explorer (Orchard actions,
 
 | Folder | What it is |
 |---|---|
-| [`solver/`](solver/src/main.rs) | Rust watcher: a view-only Orchard/Ironwood wallet over lightwalletd and Tor (librustzcash). It prints one JSON line per received note, and the `address` and `ufvk` commands print the Orchard-only deposit address and viewing key. |
-| [`worker/`](worker/deploy/DEPLOY.md) | Node order API and payout worker: quotes, memo matching, review queue, delayed SOL payouts from the capped hot wallet (and ETH payouts on Base from a separate one), the credits mint. It starts the watcher as a child process. Admin tool: `worker/src/admin.ts`. |
+| [`solver/`](solver/src/main.rs) | Rust watcher: a view-only Orchard/Ironwood wallet over lightwalletd and Tor (librustzcash). It prints one JSON line per received note, and the `address` and `ufvk` commands print the Orchard-only deposit address and viewing key. Its `payer-*` commands ([`payer.rs`](solver/src/payer.rs)) run the separate withdrawal hot wallet. |
+| [`worker/`](worker/deploy/DEPLOY.md) | Node order API and payout worker: quotes, memo matching, review queue, delayed SOL payouts from the capped hot wallet (and ETH payouts on Base from a separate one), the credits mint, cash-ins checked on chain, and delayed withdrawals to shielded ZEC. It starts the watcher as a child process. Admin tool: `worker/src/admin.ts`. |
 | [`relay/`](relay/README.md) | No-log privacy relay: Solana and Base RPC, Jupiter, KyberSwap, token icons and the read-only Discover feeds (Polymarket, Magic Eden, OpenSea), with no client headers forwarded and allowlisted calls only. |
 | [`app/`](app/README.md) | The phone app (PWA): passkey vault, buying, credits, the privacy coach, sell, send and cash out. |
 
@@ -126,7 +154,6 @@ Revolve’s core stays the same for everything below: you pay in shielded ZEC, e
 - Staking and restaking. Earn yield on SOL, ETH and liquid staking tokens without the stake being traceable back to your Zcash holdings.
 - Lending and borrowing. Supply assets or borrow against them from a fresh wallet, with collateral that can’t be linked to your other positions.
 - More chains as payout routes. Base is built (above); Robinhood Chain is next on the same rules (API_CONTRACT.md v1.4), each a new route behind the same deposit, not a new user flow.
-- Cash out to Zcash from Base positions (today they sell to ETH and can be sent out).
 - Fully non-custodial in-app wallet, once a browser Zcash library supports Ironwood (none does yet; we checked).
 
 Long-lived positions like staking, lending and perps are easier to watch over time than one-off buys, so the privacy coach will extend to them: warnings on reusing a wallet across positions, topping up from a known wallet, or closing everything at once.
