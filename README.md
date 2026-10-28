@@ -21,7 +21,7 @@ The amount and the time are now public on Zcash, and they can be matched to the 
 From one app on your phone you can:
 
 - **Buy any Solana token or tokenized stock with liquidity** (via Jupiter), paid in shielded ZEC. Live.
-- **Buy tokens on Base** (via KyberSwap): a hand-checked list, or any token by its contract address. Same shielded payment and credits; the payout is ETH to a fresh Base wallet, and the phone signs the buy. New: its first mainnet run is still to come.
+- **Browse tokens on Base**: a hand-checked list, or any token by its contract address, with KyberSwap prices. Read only for now: buying is built end to end (ETH payout to a fresh Base wallet, the phone signs a KyberSwap buy) but switched off until its hot wallet is funded and tested.
 - **Browse** prediction markets (Polymarket) and NFT collections on Solana, Ethereum and Robinhood Chain. Live, read only: these cards say "Buying coming soon".
 - **Sell** a position to SOL (or ETH on Base) inside its own wallet, **send** it out, or **cash out privately**: the coin goes back to Revolve for blind-signed credits, at once or in random parts over hours, and you **withdraw** credits to your shielded Zcash address whenever you like. On Solana, Zodl's built-in Swap stays as a faster second route. New: the first mainnet run of both is still to come.
 
@@ -109,6 +109,8 @@ Stated plainly, so nobody has to dig for them:
 - **Gradual parts need the app.** A planned part goes out when Revolve is open on your phone at or after its time; the phone holds the keys, so nothing can send for it in the background.
 - **Payouts are public on the destination chain.** Anyone can see the hot wallet pay a fresh wallet and that wallet buy a token. What they can't see is who paid for it.
 - **The relay sees IPs and logs nothing.** It also sees, in transit, which token a fresh wallet swaps into. The order API sees IPs too, and logs nothing. You trust that we run them as published.
+- **Privacy grows with the crowd.** Blind credits, the shared hot wallets and the 0.001 ZEC grid hide you among everyone else doing the same thing. While only a handful of people use Revolve, there is little to hide among: amounts and timing narrow it down to you, for Revolve itself above all.
+- **IPs are the operator's to forget.** The order API and the relay both see your IP and log nothing. Blind signatures keep the database from linking a funding, a buy and a cash-out; they can't stop an operator who chose to log IPs from noticing the same phone made all three. For the strongest separation, use a VPN or a different network for different steps.
 - **Behaviour can still link you.** Timing and amounts are fingerprints: a buy seconds after a funding, the same unusual amount twice, cashing out a whole position right after buying. The coach warns; it can't prevent.
 - **The mint key is a hot key.** If it leaked, an attacker could forge credits and claim payouts. The loss is bounded by what sits in the capped hot wallet.
 - **Refunds are manual.** A payment that doesn't match an open order exactly is held for review and refunded by hand: a wrong amount, a malformed or unknown memo, a payment after the quote expired, or a second payment to the same order.
