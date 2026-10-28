@@ -107,13 +107,14 @@ Request: `{ "tokens": [{ "msg": "...", "sig": "..." }, ...], "address": "u1..." 
 
 ### GET /withdrawals/:withdrawal_id
 
-`{ "status": "queued" }`, `{ "status": "sending" }`, or `{ "status": "sent", "txid": "..." }`. After sending, the row (and with it the address) is deleted; the txid is served from memory for 24 hours, then 404.
+`{ "status": "queued" }`, `{ "status": "sending" }`, or `{ "status": "sent", "txid": "..." }`. `sending` lasts until the transaction is mined with 3 confirmations; only then is it `sent`, and the row (and with it the address) deleted. The txid is served from memory for 24 hours, then 404.
 
 ### Rules for the worker (v1.5)
 
 - Withdrawals pay after a random 20 to 120 minutes, one at a time, so a withdrawal can't be paired with a cash-in or a funding by timing.
 - They are paid from a separate ZEC hot wallet with its own seed, never from the deposit address: the deposit address's spending key stays off the server. The hot wallet holds what an operator moves into it, and a daily cap (`WITHDRAW_DAILY_CAP_ZAT`) bounds what it pays.
 - The sender stores each signed transaction under its withdrawal id before broadcasting. A retry re-broadcasts those same bytes, which can never pay twice (the notes it spends can only be spent once).
+- Accepted by the network is not paid: a withdrawal stays `sending`, address kept, until its transaction has 3 confirmations, and is re-broadcast meanwhile. Only once it has expired unmined, 10 blocks past its expiry height, is it replaced by a new transaction; the expired one can never be mined, so this can't pay twice either.
 
 ## Privacy and trust (README)
 

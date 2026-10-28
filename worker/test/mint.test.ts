@@ -9,7 +9,7 @@ import { Mint, b64 } from "../src/mint.ts";
 import { OrderBook, type NoteLine } from "../src/orders.ts";
 import { Bucket, createApi, type ServerDeps } from "../src/server.ts";
 import type { CashinRail, Verdict } from "../src/cashin.ts";
-import { WithdrawBook, runWithdrawals, type ZecPayer } from "../src/withdrawals.ts";
+import { WITHDRAW_CONFS, WithdrawBook, runWithdrawals, type ZecPayer } from "../src/withdrawals.ts";
 
 // The client side (prepare, blind, finalize) is the library, as in the app.
 const suite = RSABSSA.SHA384.PSS.Randomized();
@@ -577,9 +577,11 @@ const UA = "u1" + "q".repeat(120);
 function fakePayer(spendable: bigint) {
   const sends: { id: string; ua: string; zat: bigint }[] = [];
   let fail = 0;
-  const payer: ZecPayer & { sends: typeof sends; failNext: (n: number) => void } = {
+  let answer = { txid: "ab".repeat(32), confirmations: WITHDRAW_CONFS };
+  const payer: ZecPayer & { sends: typeof sends; failNext: (n: number) => void; answer: (txid: string, confirmations: number) => void } = {
     sends,
     failNext: (n) => void (fail = n),
+    answer: (txid, confirmations) => void (answer = { txid, confirmations }),
     checkAddress: (ua) => ua === UA,
     cachedSpendable: () => spendable,
     refreshBalance: async () => spendable,
@@ -589,7 +591,7 @@ function fakePayer(spendable: bigint) {
         fail--;
         throw new Error("lightwalletd unreachable");
       }
-      return "ab".repeat(32);
+      return answer;
     },
   };
   return payer;
@@ -671,6 +673,50 @@ test("withdrawals pay after their random delay, one at a time, forget the addres
   now += 121 * 60_000;
   await runWithdrawals(book, payer, 800_000n);
   assert.equal(payer.sends.length, 3, "waits for the daily cap");
+});
+
+test("a withdrawal accepted but not yet mined stays sending, address kept, until its confirmations; others wait behind it", async () => {
+  let now = Date.parse("2026-10-28T10:00:00Z");
+  const db = openDb(":memory:");
+  const book = new WithdrawBook(db, () => now);
+  const payer = fakePayer(10n ** 9n);
+  const mk = (key: string, zat: bigint) => book.create({ tokenHashes: [key], spendKey: key, amountZat: zat, address: UA, fits: () => true });
+  const row = (id: string) => db.prepare("SELECT status, address, txid FROM withdrawals WHERE withdrawal_id = ?").get(id) as { status: string; address: string; txid: string | null } | undefined;
+  const a = mk("a", 400_000n);
+  assert.ok(a.kind === "created");
+
+  now += 121 * 60_000;
+  payer.answer("cd".repeat(32), 0);
+  await runWithdrawals(book, payer, 400_000n);
+  assert.equal(payer.sends.length, 1);
+  assert.deepEqual(book.get(a.id), { status: "sending" }, "accepted is not sent");
+  assert.deepEqual({ ...row(a.id) }, { status: "sending", address: UA, txid: "cd".repeat(32) }, "kept, address and all, so it can be re-sent");
+  assert.equal(book.withdrawnToday(), 0n);
+
+  const b = mk("b", 100_000n);
+  assert.ok(b.kind === "created");
+  now += 121 * 60_000;
+  // Already paid out once: a lower cap doesn't stop it being followed to its confirmations.
+  await runWithdrawals(book, payer, 0n);
+  assert.deepEqual(payer.sends.map((x) => x.id), [a.id, a.id], "the unconfirmed one is looked at again; the next waits behind it");
+
+  await runWithdrawals(book, payer, 10n ** 9n);
+  assert.equal(payer.sends.length, 2, "not looked at again before its check time");
+  now += 91_000;
+  // It expired unmined and the payer replaced it: the new transaction is the one followed.
+  payer.answer("ef".repeat(32), 0);
+  await runWithdrawals(book, payer, 10n ** 9n);
+  assert.equal(row(a.id)!.txid, "ef".repeat(32));
+
+  now += 91_000;
+  payer.answer("ef".repeat(32), WITHDRAW_CONFS);
+  await runWithdrawals(book, payer, 10n ** 9n);
+  assert.deepEqual(book.get(a.id), { status: "sent", txid: "ef".repeat(32) });
+  assert.equal(row(a.id), undefined, "the address goes once mined");
+  assert.equal(book.withdrawnToday(), 400_000n);
+
+  await runWithdrawals(book, payer, 10n ** 9n);
+  assert.equal(payer.sends.at(-1)!.id, b.id, "then the next one pays");
 });
 
 test("once minted, a funding forgets which Zcash note paid it; a re-emitted line for that note changes nothing", () =>

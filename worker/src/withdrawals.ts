@@ -3,14 +3,20 @@ import type { DatabaseSync } from "node:sqlite";
 
 // Credit withdrawals to shielded ZEC (CREDITS_CONTRACT.md v1.5). Credits are
 // spent and the withdrawal queued in one transaction; it pays after a random
-// delay, one at a time, from the separate ZEC hot wallet. Once sent the row,
-// and with it the address, is deleted; only the txid stays in memory a while.
+// delay, one at a time, from the separate ZEC hot wallet. It stays `sending`
+// until its transaction is mined with WITHDRAW_CONFS confirmations (re-broadcast
+// meanwhile, or replaced if it expired unmined); then the row, and with it the
+// address, is deleted, and only the txid stays in memory a while.
 
 /** Random wait before a withdrawal pays, so it can't be paired with a cash-in or funding by timing. */
 export const WITHDRAW_DELAY_SECS: [number, number] = [20 * 60, 120 * 60];
 const SENT_CACHE_MS = 24 * 3600 * 1000;
 /** After a failed send, the next try waits this long (the payer is idempotent per id, so retrying is safe). */
 const RETRY_SECS = 5 * 60;
+/** Confirmations before a withdrawal counts as sent and its address is forgotten (as for deposits). */
+export const WITHDRAW_CONFS = 3;
+/** A broadcast withdrawal is looked at again this often until it has its confirmations (a block is ~75 s). */
+const CHECK_SECS = 90;
 
 const ALPHABET = "0123456789abcdefghjkmnpqrstvwxyz";
 const WITHDRAWAL_ID_RE = /^rw_[0-9a-hjkmnp-tv-z]{10}$/;
@@ -26,7 +32,16 @@ export const isWithdrawalId = (s: string) => WITHDRAWAL_ID_RE.test(s);
 /** Shape check only (mainnet unified address); the payer's own decoder decides (payer-check-address). */
 export const looksLikeUa = (s: string) => /^u1[02-9ac-hj-np-z]{100,600}$/.test(s);
 
-type Row = { withdrawal_id: string; amount_zat: number; address: string; pay_after: number; status: "queued" | "sending"; spend_key: string };
+type Row = {
+  withdrawal_id: string;
+  amount_zat: number;
+  address: string;
+  pay_after: number;
+  status: "queued" | "sending";
+  spend_key: string;
+  /** Set once broadcast; the transaction it is waiting on. */
+  txid: string | null;
+};
 
 export type WithdrawResult = { kind: "created" | "retried"; id: string; amountZat: bigint } | { kind: "token_spent" | "withdraw_unavailable" };
 
@@ -104,7 +119,7 @@ export class WithdrawBook {
    * The next withdrawal to pay. One already `sending` (a crash or a failed send)
    * blocks every other until it is settled: one at a time, always.
    */
-  next(): { id: string; address: string; amountZat: bigint } | null {
+  next(): { id: string; address: string; amountZat: bigint; txid: string | null } | null {
     const now = Math.floor(this.now() / 1000);
     const sending = this.db.prepare("SELECT * FROM withdrawals WHERE status = 'sending' LIMIT 1").get() as Row | undefined;
     const r = sending
@@ -112,11 +127,16 @@ export class WithdrawBook {
         ? sending
         : undefined
       : (this.db.prepare("SELECT * FROM withdrawals WHERE status = 'queued' AND pay_after <= ? ORDER BY pay_after LIMIT 1").get(now) as Row | undefined);
-    return r ? { id: r.withdrawal_id, address: r.address, amountZat: BigInt(r.amount_zat) } : null;
+    return r ? { id: r.withdrawal_id, address: r.address, amountZat: BigInt(r.amount_zat), txid: r.txid } : null;
   }
 
   markSending(id: string): void {
     this.db.prepare("UPDATE withdrawals SET status = 'sending' WHERE withdrawal_id = ?").run(id);
+  }
+
+  /** Broadcast, not yet confirmed: remembers the transaction and looks again shortly. */
+  markBroadcast(id: string, txid: string): void {
+    this.db.prepare("UPDATE withdrawals SET txid = ?, pay_after = ? WHERE withdrawal_id = ?").run(txid, Math.floor(this.now() / 1000) + CHECK_SECS, id);
   }
 
   /** A failed send waits a while before the (idempotent) retry. */
@@ -147,21 +167,29 @@ export interface ZecPayer {
   /** Spendable zatoshis as of the last refresh, or null before the first one. */
   cachedSpendable(): bigint | null;
   refreshBalance(): Promise<bigint>;
-  /** Idempotent per id: a retry re-broadcasts the transaction signed the first time. */
-  send(id: string, ua: string, zat: bigint): Promise<string>;
+  /**
+   * Idempotent per id: a retry re-broadcasts the transaction signed the first
+   * time (or replaces it once it expired unmined). Returns its txid and its
+   * confirmations, 0 until mined.
+   */
+  send(id: string, ua: string, zat: bigint): Promise<{ txid: string; confirmations: number }>;
 }
 
 /** Pays the next due withdrawal, if any, within the daily cap. One per call. */
 export async function runWithdrawals(book: WithdrawBook, payer: ZecPayer, dailyCap: bigint): Promise<void> {
   const w = book.next();
   if (!w) return;
-  if (book.withdrawnToday() + w.amountZat > dailyCap) {
+  // One already broadcast is only followed to its confirmations: the cap was checked when it was paid.
+  if (!w.txid && book.withdrawnToday() + w.amountZat > dailyCap) {
     console.error("withdrawal waiting: daily withdrawal cap reached");
     return;
   }
   book.markSending(w.id);
   try {
-    book.markSent(w.id, await payer.send(w.id, w.address, w.amountZat));
+    const r = await payer.send(w.id, w.address, w.amountZat);
+    // Accepted is not paid: until it is mined it is kept, address and all, so it can be re-sent.
+    if (r.confirmations >= WITHDRAW_CONFS) book.markSent(w.id, r.txid);
+    else book.markBroadcast(w.id, r.txid);
   } catch (e) {
     // Still `sending`: retried later with the same id, which re-broadcasts rather than pays again.
     book.deferRetry(w.id);
