@@ -152,6 +152,65 @@ The withdrawal spends only Orchard notes and pays only an Orchard receiver, so n
 
 [NEAR Intents](https://docs.near-intents.org) swaps ZEC into another chain's asset through a network of solvers, and the result goes to an address you supply. As shown above, the ZEC leaves Zcash through a deshielding transaction: the amount and time become public and can be matched to the swap on the other side. Revolve keeps the payment fully shielded, to an Orchard-only address with an encrypted memo, so nothing about it is public on Zcash. It is also a consumer app rather than a swap route: you pick the token or stock itself, and it arrives in a fresh wallet that holds that one position and is unlinked to your others. And with credits, even the order server can't link your buys to your deposit or to each other.
 
+## Business model and unit economics
+
+Revolve earns the way an exchange desk does: a spread on the conversions it performs. No accounts, no ads, no data: it keeps too little about its users to sell anything else, which is the point.
+
+### How it earns today
+
+| Where | What Revolve keeps |
+|---|---|
+| Every buy, paid from Zodl or with credits | **1.5%**: the payout is 98.5% of the ZEC's value in SOL or ETH, at a market price refreshed every minute (`SPREAD_BPS=150`) |
+| Every cash-out to credits | **1.5%** the other way: one credit costs 101.5% of 0.001 ZEC's value in SOL or ETH |
+| Funding credits, withdrawing them | Nothing: both at par (1 credit = 0.001 ZEC), and Revolve pays the withdrawal's network fee |
+
+A full round trip (ZEC to a token and back to shielded ZEC) costs the user about 3% plus network fees. The spread also absorbs the price moving while a quote is open (up to 15 minutes).
+
+### What one buy costs Revolve (Solana, default settings)
+
+- **Gas allowance: 0.005 SOL** sent with every payout on top of the user's amount (`SWAP_FEE_LAMPORTS`), so the fresh wallet can pay for its swap, its token account's rent (0.00204 SOL) and a later sale. It stays in the user's wallet: it is a subsidy.
+- **The payout transaction: 0.000005 SOL.**
+- **Rebalancing: about 0.5% of the order (our estimate, not measured).** Buys leave ZEC at the deposit address and take SOL out of the hot wallet; cash-outs run the other way (SOL in, ZEC out), so only the net imbalance has to be swapped back.
+- The Zcash fee on the user's own payment is paid by their wallet, not by Revolve.
+
+Per buy worth V in SOL, Revolve's contribution is **1% of V − 0.005 SOL**. At the ZEC/SOL rate of our first mainnet payout (about 12.3 SOL per ZEC):
+
+| Buy | Worth | Spread earned | Contribution today | With the gas allowance passed through |
+|---|---|---|---|---|
+| 0.002 ZEC (the minimum) | 0.025 SOL | 0.00037 SOL | −0.0048 SOL (−19%) | +0.00024 SOL (+1%) |
+| 0.005 ZEC (today's largest) | 0.061 SOL | 0.00092 SOL | −0.0044 SOL (−7%) | +0.00061 SOL (+1%) |
+| 0.02 ZEC | 0.25 SOL | 0.0037 SOL | −0.0026 SOL (−1%) | +0.0025 SOL (+1%) |
+| 0.05 ZEC (the cap per funding) | 0.61 SOL | 0.0092 SOL | +0.0011 SOL (+0.2%) | +0.0061 SOL (+1%) |
+
+**At today's test sizes every buy is subsidized**: the gas allowance is worth more than the spread, and a buy pays for itself only above about 0.04 ZEC. That's deliberate while the hot wallets are tiny, and these are the levers, in order:
+
+1. **Pass the gas allowance through**: take it out of the payout instead of adding it, so the user pays their own gas as with any wallet. Every buy then earns about 1% at any size. On a minimum buy, though, gas would be about 20% of what the user gets, so this goes with a higher minimum (around 0.01 ZEC).
+2. **Right-size it**: a fresh wallet really needs about 0.0025 SOL (rent plus a few fees). Halving the allowance halves the break-even, to about 0.02 ZEC.
+3. **Bigger buys**: today's largest buy (0.005 ZEC) is set by how much SOL the hot wallet holds, and payouts are capped at 1 SOL a day by default. These are safety limits, raised as volume and trust grow; the margin approaches 1% as buys grow.
+
+On Base the allowance is 0.00003 ETH (`BASE_GAS_ALLOWANCE_WEI`), several times smaller in value, so Base buys break even at much smaller sizes.
+
+### Withdrawals
+
+Revolve pays each withdrawal's Zcash fee, typically 0.0001 ZEC (ZIP-317: 0.00005 ZEC per action, at least two). Our first mainnet withdrawal paid exactly that. That is 10% of a 1-credit withdrawal, 2.5% of a 4-credit one and 0.2% of a 50-credit one. The 1.5% earned on a cash-in covers it only from about 7 credits up, so small withdrawals are a cost today; a flat withdrawal fee (below) or a minimum withdrawal size fixes that.
+
+### Fixed costs
+
+Today: one small DigitalOcean droplet (1 vCPU, 512 MB, about $4 a month) runs the watcher, the worker, the relay and Caddy. The app is on Vercel's free tier and DNS on DuckDNS. Solana and Base RPC, prices (CoinGecko) and lightwalletd (zec.rocks, over Tor) are free public endpoints. With the gas allowance passed through (about 1% per buy), roughly $400 of buys a month covers that. At scale, the costs that grow are paid RPC endpoints, a larger server, a security audit, and someone on call for review items and hot wallet top-ups.
+
+### More ways to earn (not built yet)
+
+- **A swap platform fee.** The buy itself runs on the phone through Jupiter (Solana) and KyberSwap (Base), and both let an integrator take a small fee on the swaps it routes. This links nothing new on chain: every fresh wallet is already funded by the same public hot wallet.
+- **A withdrawal fee**, such as a flat 1 credit, instead of Revolve paying the network fee.
+- **The same spread on new products.** Prediction markets, NFTs, perps, staking and lending (see the roadmap) all pay in through the same shielded deposit.
+- **Private checkout for other apps.** Wallets and apps could use Revolve's order API to let their users pay from shielded ZEC for anything, for a share of the spread.
+
+### What Revolve won't charge for
+
+- **Privacy features stay free.** Gradual cash-out, random delays and the coach protect everyone only if everyone uses them: a paid privacy tier would shrink the crowd and mark the people who paid for it.
+- **One price for everyone.** No accounts means no subscriptions or loyalty tiers, and per-user pricing would itself be a fingerprint.
+- **No data to sell, no lending.** Revolve doesn't keep the data, and it won't lend out the ZEC behind credits: balances are custodial, and they must be there to withdraw.
+
 ## Architecture and repo map
 
 | Folder | What it is |
