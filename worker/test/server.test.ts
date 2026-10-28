@@ -161,3 +161,65 @@ test("POST /orders: amount_zec wins over bucket_zec; legacy form takes any grid 
     assert.equal((await post(base, "0.004")).status, 400);
     assert.equal((await post(base, null)).status, 400);
   }));
+
+test("DELETE /orders/:id cancels an unpaid order and releases its inventory; 409 once a payment is seen", async () => {
+  const book = new OrderBook(openDb(":memory:"));
+  const server = createApi({
+    book,
+    appOrigin: "https://app.test",
+    depositUa: "u1test",
+    quoteTtlSecs: 1800,
+    maxOpenOrders: 10,
+    quote: (zat) => zat * 100n,
+    usdPerZec: () => "1224.50",
+    // Like the real worker: a fixed balance less what open orders have reserved.
+    freeInventory: () => 60_000_000n - book.committedLamports(),
+    mint: null,
+    limits: { write: new Bucket(1e9, 1e9), read: new Bucket(1e9, 1e9) },
+  });
+  await new Promise<void>((r) => server.listen(0, "127.0.0.1", r));
+  const base = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
+  const create = () => fetch(`${base}/orders`, { method: "POST", body: JSON.stringify({ amount_zec: "0.005" }) });
+  const del = (id: string) => fetch(`${base}/orders/${id}`, { method: "DELETE" });
+  const burner = "11111111111111111111111111111111";
+  try {
+    const first = (await (await create()).json()) as { order_id: string };
+    assert.equal(book.committedLamports(), 50_000_000n);
+    assert.equal((await create()).status, 409, "inventory is reserved by the open order");
+
+    const pre = await fetch(`${base}/orders/${first.order_id}`, { method: "OPTIONS" });
+    assert.match(pre.headers.get("access-control-allow-methods")!, /DELETE/);
+
+    const ok = await del(first.order_id);
+    assert.equal(ok.status, 204);
+    assert.equal(book.committedLamports(), 0n, "inventory released");
+    assert.equal((await fetch(`${base}/orders/${first.order_id}`)).status, 404, "record deleted");
+    assert.deepEqual(await (await del(first.order_id)).json(), { error: "not_found" });
+    assert.equal((await del("rv_0000000000")).status, 404);
+    assert.equal((await del("nope")).status, 404);
+
+    // A payment that still arrives for the cancelled order is held for review, never paid.
+    const memo = `rv1|${first.order_id}|${burner}`;
+    book.onNote({ txid: "aa".repeat(32), pool: "ironwood", output_index: 0, value: 500_000, memo, height: 1, confirmations: 9 });
+    assert.deepEqual(book.reviewNotes().map((n) => n.reason), ["paid_after_cancel"]);
+    assert.equal(book.due().length, 0);
+
+    // Once a note is seen, cancelling is refused and the order is kept.
+    const second = (await (await create()).json()) as { order_id: string };
+    assert.equal(book.committedLamports(), 50_000_000n);
+    book.onNote({ txid: "bb".repeat(32), pool: "ironwood", output_index: 0, value: 500_000, memo: `rv1|${second.order_id}|${burner}`, height: 1, confirmations: 0 });
+    const seen = await del(second.order_id);
+    assert.equal(seen.status, 409);
+    assert.deepEqual(await seen.json(), { error: "payment_seen" });
+    assert.equal(book.get(second.order_id)!.status, "seen");
+    assert.equal(book.committedLamports(), 50_000_000n, "still reserved");
+
+    // Paid out (row gone, signature cached): still 409, not 404.
+    book.onNote({ txid: "bb".repeat(32), pool: "ironwood", output_index: 0, value: 500_000, memo: `rv1|${second.order_id}|${burner}`, height: 1, confirmations: 20 });
+    book.markPaying(second.order_id, "sig", 1);
+    book.markPaid(second.order_id, "sig");
+    assert.equal((await del(second.order_id)).status, 409);
+  } finally {
+    server.close();
+  }
+});

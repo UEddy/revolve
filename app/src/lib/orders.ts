@@ -45,6 +45,7 @@ const ERRORS: Record<string, string> = {
   invalid_burner: "This order's wallet address was refused.",
   invalid_blinded: "Revolve didn't accept this phone's request for credits.",
   mint_unavailable: "Credits are paused for a moment. Try again shortly.",
+  payment_seen: "A payment for this has already been seen, so it can't be cancelled. It's already being processed.",
 };
 
 function checkQuote(q: Quote, amountZec: string): Quote {
@@ -75,6 +76,7 @@ export async function call<T>(path: string, init?: RequestInit): Promise<T> {
     } catch {}
     throw new OrderApiError(msg, res.status, code);
   }
+  if (res.status === 204) return undefined as T;
   return (await res.json()) as T;
 }
 
@@ -110,6 +112,31 @@ export async function getOrder(orderId: string): Promise<OrderState | null> {
     if (e instanceof OrderApiError && e.status === 404) return null;
     throw e;
   }
+}
+
+/**
+ * What a cancel came to: `cancelled` (the server deleted it), `processing` (409:
+ * a payment was already seen, so the order stays), or `unknown` (404: the server
+ * has no open record; it may have been paid out long ago, so nothing local is
+ * thrown away on that answer).
+ */
+export type CancelOutcome = "cancelled" | "processing" | "unknown";
+
+export async function cancelAt(path: string): Promise<CancelOutcome> {
+  try {
+    await call<void>(path, { method: "DELETE" });
+    return "cancelled";
+  } catch (e) {
+    if (e instanceof OrderApiError && e.status === 409) return "processing";
+    if (e instanceof OrderApiError && e.status === 404) return "unknown";
+    throw e;
+  }
+}
+
+/** DELETE /orders/:id: only while no payment has been seen. */
+export async function cancelOrder(orderId: string): Promise<CancelOutcome> {
+  if (import.meta.env.DEV && ORDER_API === "mock") return mock.cancel(orderId);
+  return cancelAt(`/orders/${encodeURIComponent(orderId)}`);
 }
 
 // ---- demo mode: a timeline that walks every status, never touches money ----
@@ -151,6 +178,15 @@ export const mock = {
     all[q.order_id]!.credits = true;
     sessionStorage.setItem(MOCK_KEY, JSON.stringify(all));
     return { order_id: q.order_id, payout_lamports: q.payout_lamports };
+  },
+  cancel(id: string): CancelOutcome {
+    const all = mock.load();
+    const o = all[id];
+    if (!o) return "unknown";
+    if (o.credits || mock.get(id)?.status !== "awaiting_payment") return "processing";
+    delete all[id];
+    sessionStorage.setItem(MOCK_KEY, JSON.stringify(all));
+    return "cancelled";
   },
   get(id: string): OrderState | null {
     const o = mock.load()[id];
